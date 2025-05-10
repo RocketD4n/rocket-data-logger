@@ -99,9 +99,16 @@ void setup() {
       bmp.getEvent(&event);
       
       // Calculate sea level pressure using GPS altitude
-      seaLevelPressure = bmp.pressureToSeaLevel(event.pressure, gps.altitude.meters());
+      float currentPressure = event.pressure;
+      float currentTemperature;
+      bmp.getTemperature(&currentTemperature);
+      
+      // Calculate sea level pressure using the current altitude and temperature
+      seaLevelPressure = bmp.pressureToAltitude(currentPressure, currentPressure, currentTemperature);
       Serial.print("Sea level pressure initialized: ");
       Serial.println(seaLevelPressure);
+      Serial.print("Temperature: ");
+      Serial.println(currentTemperature);
       break;
     }
     delay(1000);
