@@ -1,6 +1,5 @@
 /*
  *  TODO:
- *  log gps values
  */
  
 #include <SPI.h>
