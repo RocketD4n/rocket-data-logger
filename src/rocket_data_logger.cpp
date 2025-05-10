@@ -184,7 +184,7 @@ void setup() {
   if (Textfile) {
     Serial.print("Writing header to file ");
     Serial.println(filename);
-    Textfile.println("micros, XG, YG, ZG, XAc, YAc, ZAc, altitude, temp");
+    Textfile.println("micros, XG, YG, ZG, XAc, YAc, ZAc, gps_speed, gps_altitude, altitude, temp");
     Textfile.print(micros());
     float altitude, temp;
     getAltitudeAndTemp(altitude, temp);
@@ -369,9 +369,10 @@ void loop() {
   
  // gps.location.lat(), gps.location.lng(), gps.speed.kmph(), gps.altitude.meters()
 //  gps.date.year(), month(), day(), hour(), minute(), second(), 
-  snprintf(line, sizeof(line), "%lu,%d,%d,%d,%d,%d,%d,%f,%f", micros(), 
+  snprintf(line, sizeof(line), "%lu,%d,%d,%d,%d,%d,%d,%f,%f,%f,%f", micros(), 
             g.gyro.x, g.gyro.y, g.gyro.z,  // divide by 131.0 to convert to degrees per second
             a.acceleration.x, a.acceleration.y, a.acceleration.z,  // divide by 16384.0 to convert to accel in G
+            gps.speed.mps(), gps.altitude.meters(),
             altitude, temperature);
   Textfile.println(line);
   Serial.println(line);
