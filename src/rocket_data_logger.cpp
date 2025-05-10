@@ -10,12 +10,11 @@
 #include <Adafruit_BMP085_U.h>
 #include <SoftwareSerial.h>
 #include <TinyGPS++.h>
-#include <CC1101.h>
+#include <RadioLib.h>
 
 // CC1101 configuration
 #define CC1101_CS 16  // D0 on NodeMCU
 #define CC1101_GDO0 14 // D5 on NodeMCU
-#define CC1101_GDO2 15 // D8 on NodeMCU
 
 // Communication protocol constants
 #define PROTOCOL_VERSION 1
@@ -44,10 +43,14 @@ struct AltitudePacket {
 };
 
 // CC1101 instance
-CC1101 radio(CC1101_CS, CC1101_GDO0, CC1101_GDO2);
+Module* module = new Module(CC1101_CS, CC1101_GDO0, RADIOLIB_NC, RADIOLIB_NC);
+CC1101* radio = new CC1101(module);
 
 // Global variables for altitude tracking
 uint16_t maxAltitude = 0;
+unsigned long lastFlush = 0;
+bool launchDetected = false;
+char line[256];
 
 #define LED_PIN 2 // Built-in LED on NodeMCU (D4)
 #define PRIMARY_RELAY_PIN 12 // D6 on NodeMCU
@@ -90,20 +93,29 @@ void getAltitudeAndTemp(float& altitude, float& temp) {
 
 void setup() {
   // Initialize CC1101
-  radio.initialize();
-  radio.setFrequency(433.92); // 433.92 MHz
-  radio.setPower(15); // 15 dBm
-  radio.setModulation(FSK);
-  radio.setBitRate(2400);
-  radio.setPreambleLength(4);
-  radio.setSyncWord(0x55);
-  radio.setAddress(0x01);
-  radio.setPacketLength(64);
-  radio.enableCRC();
+  if (radio->begin() != RADIOLIB_ERR_NONE) {
+    Serial.println("Failed to initialize CC1101");
+    while (true) { delay(10); }
+  }
+  
+  // Set frequency to 433.92 MHz
+  radio->setFrequency(433.92);
+  
+  // Set bit rate to 2400 bps
+  radio->setBitRate(2400);
+  
+  // Set preamble length and quality threshold
+  radio->setPreambleLength(4, 0);
+  
+  // Set sync word
+  radio->setSyncWord(0x55, 0x55);
+  
+  // Set node address
+  radio->setNodeAddress(0x01);
+
   
   Serial.println("CC1101 initialized");
   
-  Wire.begin(D2, D1);
   Wire.begin(D2, D1);
   Serial.begin(74880);
   
@@ -199,12 +211,17 @@ void setup() {
 }
 
 void sendGpsData() {
-    if (gps.location.isUpdated() && gps.altitude.isValid()) {
+    // Get GPS data
+    if (Serial1.available()) {
+        gps.encode(Serial1.read());
+    }
+    
+    if (gps.location.isValid()) {
         GpsDataPacket packet;
         packet.version = PROTOCOL_VERSION;
         packet.packetType = GPS_DATA_PACKET;
         packet.timestamp = micros();
-        packet.latitude = gps.location.lat() * 10000000; // Convert to fixed point
+        packet.latitude = gps.location.lat() * 10000000;
         packet.longitude = gps.location.lng() * 10000000;
         packet.altitude = gps.altitude.meters();
         
@@ -216,8 +233,11 @@ void sendGpsData() {
         }
         packet.checksum = checksum;
         
-        radio.send((uint8_t*)&packet, sizeof(packet));
-        Serial.println("Sent GPS data");
+        if (radio->transmit((uint8_t*)&packet, sizeof(packet)) != RADIOLIB_ERR_NONE) {
+            Serial.println("Failed to send GPS data");
+        } else {
+            Serial.println("Sent GPS data");
+        }
     }
 }
 
@@ -245,8 +265,11 @@ void sendAltitudeData() {
     }
     packet.checksum = checksum;
     
-    radio.send((uint8_t*)&packet, sizeof(packet));
-    Serial.println("Sent altitude data");
+    if (radio->transmit((uint8_t*)&packet, sizeof(packet)) != RADIOLIB_ERR_NONE) {
+        Serial.println("Failed to send altitude data");
+    } else {
+        Serial.println("Sent altitude data");
+    }
 }
 
 void loop() {
@@ -271,7 +294,8 @@ void loop() {
     
     // Process IMU data
     sensors_event_t a, g;
-    mpu.getEvent(&a, &g);
+    sensors_event_t temp;
+    mpu.getEvent(&a, &g, &temp);
     
     // Log data to SD card
     if (Textfile) {
@@ -310,7 +334,8 @@ void loop() {
     
     if (launchDetected) {
         float currentAltitude;
-        getAltitudeAndTemp(currentAltitude, temp);
+        float currentTemp;
+        getAltitudeAndTemp(currentAltitude, currentTemp);
         
         if (!relayActive && currentAltitude < lastAltitude - ALTITUDE_DROP_THRESHOLD) {
             relayActive = true;
@@ -368,7 +393,7 @@ void loop() {
   
  // gps.location.lat(), gps.location.lng(), gps.speed.kmph(), gps.altitude.meters()
 //  gps.date.year(), month(), day(), hour(), minute(), second(), 
-  snprintf(line, sizeof(line), "%lu,%d,%d,%d,%d,%d,%d,%f,%f,%f,%f", micros(), 
+  snprintf(line, sizeof(line), "%lu,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f", micros(), 
             g.gyro.x, g.gyro.y, g.gyro.z,  // divide by 131.0 to convert to degrees per second
             a.acceleration.x, a.acceleration.y, a.acceleration.z,  // divide by 16384.0 to convert to accel in G
             gps.speed.mps(), gps.altitude.meters(),
