@@ -136,7 +136,7 @@ struct AltitudePacket {
    - Gyroscope readings
 
 4. Wireless Transmission
-   - 433MHz CC1101 radio
+   - 433MHz radio
    - Error detection
    - Timestamped data
 
@@ -178,12 +178,12 @@ struct AltitudePacket {
 - Adafruit MPU6050
 - Adafruit BMP085 Unified
 - TinyGPSPlus
-- RadioLib (CC1101)
+- RadioLib 
 - SPI
 - Wire
 - SD
 
 ### Telemetry Receiver
 - TFT_eSPI
-- RadioLib (CC1101)
+- RadioLib 
 - SPI

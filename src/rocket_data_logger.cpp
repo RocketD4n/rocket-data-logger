@@ -1,5 +1,10 @@
 /*
  *  TODO:
+ *  - receiver to send to rocket command to make sound
+ *  - rocket to transmit, max G and launch state
+ *  - receiver to log SNR
+ *  - receiver to offer binding options
+ *  - receiver to send to rocket parameters/constants
  */
  
 #include <SPI.h>
@@ -10,6 +15,7 @@
 #include <Adafruit_BMP085_U.h>
 #include <SoftwareSerial.h>
 #include <TinyGPS++.h>
+#include <MAX1704X.h>
 
 // CC1101 configuration
 #define CC1101_CS 16  // D0 on NodeMCU
@@ -26,6 +32,7 @@ uint16_t maxAltitude = 0;
 unsigned long lastFlush = 0;
 bool launchDetected = false;
 char line[256];
+float maxG = 0.0f;
 
 // RGB LED pins
 #define LED_RED_PIN 0    // D3 on NodeMCU
@@ -49,9 +56,10 @@ void setLedBlue() { setLedColor(false, false, true); }
 #define ALTITUDE_DROP_THRESHOLD 10.0f // meters
 #define BACKUP_DELAY 1000000 // 1 second in microseconds
 
-Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
-File Textfile;
 Adafruit_MPU6050 mpu;
+Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
+MAX1704X lipo(0.00125f);  // MAX17043 voltage resolution
+File Textfile;
 float seaLevelPressure = 1013.25f; // Default value, will be updated with GPS altitude
 
 // Track altitude state
@@ -122,6 +130,11 @@ void setup() {
     setLedRed();  // Red indicates error
     while (1);
   }
+
+  // Initialize MAX17043
+  lipo.reset();
+  lipo.quickstart();
+  Serial.println("MAX17043 ready.");
 
   Serial.println("Waiting for GPS....");
   gpsSerial.begin(9600);
@@ -199,16 +212,9 @@ void sendGpsData() {
         packet.timestamp = millis();
         packet.latitude = gps.location.lat() * 10000000;
         packet.longitude = gps.location.lng() * 10000000;
-        packet.altitude = gps.altitude.meters();
-        
-        // Calculate checksum
-        uint8_t checksum = 0;
-        uint8_t* ptr = (uint8_t*)&packet;
-        for (uint8_t i = 0; i < sizeof(packet) - 1; i++) {
-            checksum ^= ptr[i];
-        }
-        packet.checksum = checksum;
-        
+        packet.altitude = (uint16_t)(gps.altitude.meters() * 10.0f);
+        packet.batteryMillivolts = (uint16_t)(lipo.voltage() * 1000.0f);
+        packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(GpsDataPacket) - 1);
         if (radio->transmit((uint8_t*)&packet, sizeof(packet)) != RADIOLIB_ERR_NONE) {
             Serial.println("Failed to send GPS data");
         } else {
@@ -232,14 +238,12 @@ void sendAltitudeData() {
     packet.timestamp = millis();
     packet.currentAltitude = currentAltitude;
     packet.maxAltitude = maxAltitude;
+    packet.temperature = temp;
+    packet.maxG = maxG;
+    packet.launchState = launchDetected;
     
     // Calculate checksum
-    uint8_t checksum = 0;
-    uint8_t* ptr = (uint8_t*)&packet;
-    for (uint8_t i = 0; i < sizeof(packet) - 1; i++) {
-        checksum ^= ptr[i];
-    }
-    packet.checksum = checksum;
+    packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(AltitudePacket) - 1);
     
     if (radio->transmit((uint8_t*)&packet, sizeof(packet)) != RADIOLIB_ERR_NONE) {
         Serial.println("Failed to send altitude data");
@@ -327,6 +331,7 @@ void loop() {
     float aTotal = sqrt(a.acceleration.x * a.acceleration.x 
                       + a.acceleration.y * a.acceleration.y 
                       + a.acceleration.z * a.acceleration.z);
+    maxG = max(maxG, aTotal);
     if (!launchDetected && aTotal > 1.7) { 
       Serial.println("Launch detected!");
       launchDetected = true;

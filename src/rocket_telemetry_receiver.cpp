@@ -15,8 +15,9 @@ TFT_eSPI tft = TFT_eSPI();
 Radio* radio = new CC1101Radio(CC1101_CS, CC1101_GDO0, RADIOLIB_NC);
 
 // Display layout constants
-#define HEADER_HEIGHT 40
-#define VALUE_HEIGHT 35
+#define HEADER_HEIGHT 30
+#define VALUE_HEIGHT 26
+#define RIGHT_COL 180
 #define LABEL_COLOR TFT_YELLOW
 #define VALUE_COLOR TFT_WHITE
 
@@ -28,6 +29,10 @@ float longitude = 0.0f;
 float gpsAltitude = 0.0f;
 unsigned long lastPacketTime = 0;
 unsigned long millisAtFirstPacket = 0;
+float batteryVoltage = 0.0f;
+float maxG = 0.0f;
+bool launchState = false;
+float temperature = 0.0f;
 
 // Packet statistics
 uint32_t totalPackets = 0;
@@ -43,13 +48,21 @@ void setup() {
     tft.fillScreen(TFT_BLACK);
     tft.setTextDatum(TL_DATUM);
     
-    // Draw static labels
-    tft.setTextColor(LABEL_COLOR);
+    // Draw labels
+    tft.setTextColor(LABEL_COLOR, TFT_BLACK);
+    // Left column
     tft.drawString("Current Alt:", 20, HEADER_HEIGHT);
     tft.drawString("Max Alt:", 20, HEADER_HEIGHT + VALUE_HEIGHT);
     tft.drawString("GPS:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 2);
     tft.drawString("Last Update:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 3);
-    tft.drawString("Packet Stats:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 4);
+    tft.drawString("Stats:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 4);
+    
+    // Right column
+    tft.drawString("Battery:", RIGHT_COL, HEADER_HEIGHT);
+    tft.drawString("Launch:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT);
+    tft.drawString("Temp:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT * 2);
+    tft.drawString("Max-G:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+
     
     // Initialize radio
     Serial.print(F("[Radio] Initializing ... "));
@@ -87,15 +100,25 @@ void updateDisplay() {
     // Update packet statistics
     String statsStr = String(totalPackets) + " tot, " + String(badPackets) + " bad, " + String(badChecksums) + " crc    ";
     tft.drawString(statsStr, 180, HEADER_HEIGHT + VALUE_HEIGHT * 4);
+    
+    // Update battery voltage
+    String batteryStr = String(batteryVoltage, 2) + "V    ";
+    tft.drawString(batteryStr, RIGHT_COL + 60, HEADER_HEIGHT);
+    
+    // Update launch state
+    String launchStr = launchState ? "Launched    " : "Waiting...    ";
+    tft.drawString(launchStr, RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT);
+    
+    // Update temperature
+    String tempStr = String(temperature, 1) + "C    ";
+    tft.drawString(tempStr, RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT * 2);
+    
+    // Update max G-force
+    String gStr = String(maxG, 1) + "g    ";
+    tft.drawString(gStr, RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT * 3);
 }
+    
 
-uint8_t calculateChecksum(uint8_t* data, size_t length) {
-    uint8_t checksum = 0;
-    for (size_t i = 0; i < length - 1; i++) { // -1 to exclude the checksum byte
-        checksum ^= data[i];
-    }
-    return checksum;
-}
 
 bool verifyPacket(uint8_t* data, size_t length) {
     if (length < 2) { // Minimum packet size (version + type)
@@ -126,6 +149,8 @@ void processGpsPacket(uint8_t* data) {
     latitude = packet->latitude / 1000000.0f;
     longitude = packet->longitude / 1000000.0f;
     gpsAltitude = packet->altitude;
+    batteryVoltage = packet->batteryMillivolts / 1000.0f;
+
     
     if (millisAtFirstPacket == 0) {
         millisAtFirstPacket = millis();
@@ -144,6 +169,9 @@ void processAltitudePacket(uint8_t* data) {
     
     currentAltitude = packet->currentAltitude;
     maxAltitude = packet->maxAltitude;
+    maxG = packet->maxG;
+    launchState = packet->launchState;
+    temperature = packet->temperature;
     
     if (millisAtFirstPacket == 0) {
         millisAtFirstPacket = millis();
