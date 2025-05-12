@@ -27,7 +27,7 @@ float latitude = 0.0f;
 float longitude = 0.0f;
 float gpsAltitude = 0.0f;
 unsigned long lastPacketTime = 0;
-unsigned long currentPacketTime = 0;
+unsigned long millisAtFirstPacket = 0;
 
 // Packet statistics
 uint32_t totalPackets = 0;
@@ -80,7 +80,7 @@ void updateDisplay() {
     tft.drawString(gpsStr + "    ", 180, HEADER_HEIGHT + VALUE_HEIGHT * 2);
     
     // Update last packet time
-    unsigned long timeSinceLastPacket = (currentPacketTime - lastPacketTime) / 1000;
+    unsigned long timeSinceLastPacket = (millis() - millisAtFirstPacket - lastPacketTime) / 1000;
     String timeStr = String(timeSinceLastPacket) + "s ago    ";
     tft.drawString(timeStr, 180, HEADER_HEIGHT + VALUE_HEIGHT * 3);
     
@@ -127,8 +127,10 @@ void processGpsPacket(uint8_t* data) {
     longitude = packet->longitude / 1000000.0f;
     gpsAltitude = packet->altitude;
     
-    lastPacketTime = currentPacketTime;
-    currentPacketTime = packet->timestamp;
+    if (millisAtFirstPacket == 0) {
+        millisAtFirstPacket = millis();
+    }   
+    lastPacketTime = packet->timestamp;
     
     updateDisplay();
 }
@@ -143,8 +145,10 @@ void processAltitudePacket(uint8_t* data) {
     currentAltitude = packet->currentAltitude;
     maxAltitude = packet->maxAltitude;
     
-    lastPacketTime = currentPacketTime;
-    currentPacketTime = packet->timestamp;
+    if (millisAtFirstPacket == 0) {
+        millisAtFirstPacket = millis();
+    }  
+    lastPacketTime = packet->timestamp;
     
     updateDisplay();
 }
