@@ -10,17 +10,16 @@
 #include <Adafruit_BMP085_U.h>
 #include <SoftwareSerial.h>
 #include <TinyGPS++.h>
-#include <RadioLib.h>
 
 // CC1101 configuration
 #define CC1101_CS 16  // D0 on NodeMCU
 #define CC1101_GDO0 14 // D5 on NodeMCU
 
 #include "rocket_telemetry_protocol.h"
+#include "cc1101_radio.h"
 
-// CC1101 instance
-Module* module = new Module(CC1101_CS, CC1101_GDO0, RADIOLIB_NC, RADIOLIB_NC);
-CC1101* radio = new CC1101(module);
+// Radio instance using CC1101
+Radio* radio = new CC1101Radio(CC1101_CS, CC1101_GDO0, RADIOLIB_NC);
 
 // Global variables for altitude tracking
 uint16_t maxAltitude = 0;
@@ -68,29 +67,20 @@ void getAltitudeAndTemp(float& altitude, float& temp) {
 }
 
 void setup() {
-  // Initialize CC1101
-  if (radio->begin() != RADIOLIB_ERR_NONE) {
-    Serial.println("Failed to initialize CC1101");
+  // Initialize radio
+  if (!radio->begin()) {
+    Serial.println("Failed to initialize radio");
     while (true) { delay(10); }
   }
   
-  // Set frequency to 433.92 MHz
-  radio->setFrequency(433.92);
+  // Configure radio parameters
+  // Using 433.92 MHz frequency, 250 kHz bandwidth (adjust if needed), and 10 dBm power
+  if (!radio->configure(433.92, 250.0, 10)) {
+    Serial.println("Failed to configure radio");
+    while (true) { delay(10); }
+  }
   
-  // Set bit rate to 2400 bps
-  radio->setBitRate(2400);
-  
-  // Set preamble length and quality threshold
-  radio->setPreambleLength(4, 0);
-  
-  // Set sync word
-  radio->setSyncWord(0x55, 0x55);
-  
-  // Set node address
-  radio->setNodeAddress(0x01);
-
-  
-  Serial.println("CC1101 initialized");
+  Serial.println("Radio initialized");
   
   Wire.begin(D2, D1);
   Serial.begin(74880);

@@ -1,8 +1,8 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <TFT_eSPI.h>
-#include <RadioLib.h>
 #include "rocket_telemetry_protocol.h"
+#include "cc1101_radio.h"
 
 // CC1101 configuration for ESP32
 #define CC1101_CS 5    // GPIO5
@@ -11,9 +11,8 @@
 // Initialize TFT display
 TFT_eSPI tft = TFT_eSPI();
 
-// CC1101 instance
-Module* module = new Module(CC1101_CS, CC1101_GDO0, RADIOLIB_NC, RADIOLIB_NC);
-CC1101* radio = new CC1101(module);
+// Radio instance using CC1101
+Radio* radio = new CC1101Radio(CC1101_CS, CC1101_GDO0, RADIOLIB_NC);
 
 // Display layout constants
 #define HEADER_HEIGHT 30
@@ -51,21 +50,21 @@ void setup() {
     tft.drawString("Last Update:", 10, HEADER_HEIGHT + VALUE_HEIGHT * 3);
     tft.drawString("Packet Stats:", 10, HEADER_HEIGHT + VALUE_HEIGHT * 4);
     
-    // Initialize CC1101
-    Serial.print(F("[CC1101] Initializing ... "));
-    int state = radio->begin();
-    if (state == RADIOLIB_ERR_NONE) {
-        Serial.println(F("success!"));
-    } else {
-        Serial.print(F("failed, code "));
-        Serial.println(state);
+    // Initialize radio
+    Serial.print(F("[Radio] Initializing ... "));
+    if (!radio->begin()) {
+        Serial.println(F("failed!"));
         while (true);
     }
+    Serial.println(F("success!"));
     
-    // Set frequency to 433.92 MHz (same as transmitter)
-    if (radio->setFrequency(433.92) == RADIOLIB_ERR_NONE) {
-        Serial.println(F("Frequency set success!"));
+    // Configure radio parameters
+    // Using 433.92 MHz frequency, 250 kHz bandwidth (adjust if needed), and 10 dBm power
+    if (!radio->configure(433.92, 250.0, 10)) {
+        Serial.println(F("Radio configuration failed!"));
+        while (true);
     }
+    Serial.println(F("Radio configured successfully!"));
 }
 
 void updateDisplay() {
