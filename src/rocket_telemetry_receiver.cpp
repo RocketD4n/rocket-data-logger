@@ -52,17 +52,18 @@ void setup() {
     // Draw labels
     tft.setTextColor(LABEL_COLOR, TFT_BLACK);
     // Left column
-    tft.drawString("Current Alt:", 20, HEADER_HEIGHT);
+    tft.drawString("Alt:", 20, HEADER_HEIGHT);
     tft.drawString("Max Alt:", 20, HEADER_HEIGHT + VALUE_HEIGHT);
     tft.drawString("GPS:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 2);
-    tft.drawString("Last Update:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 3);
-    tft.drawString("Stats:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 4);
-    
+    tft.drawString("Staleness:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 3);
     // Right column
     tft.drawString("Battery:", RIGHT_COL, HEADER_HEIGHT);
     tft.drawString("Launch:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT);
     tft.drawString("Temp:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT * 2);
     tft.drawString("Max-G:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+    
+    // Stats row (full width)
+    tft.drawString("Stats:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 4);
 
     
     // Initialize radio
@@ -89,19 +90,19 @@ void updateDisplay() {
     tft.drawString(String(currentAltitude, 1) + "m    ", 180, HEADER_HEIGHT);
     tft.drawString(String(maxAltitude, 1) + "m    ", 180, HEADER_HEIGHT + VALUE_HEIGHT);
     
-    // Update GPS coordinates
-    String gpsStr = String(latitude, 6) + ", " + String(longitude, 6);
-    tft.drawString(gpsStr + "    ", 180, HEADER_HEIGHT + VALUE_HEIGHT * 2);
+    // Update GPS coordinates (more compact format)
+    String gpsStr = String(latitude, 5) + "," + String(longitude, 5);
+    tft.drawString(gpsStr + "  ", 180, HEADER_HEIGHT + VALUE_HEIGHT * 2);
     
-    // Update last packet time
+    // Update staleness
     unsigned long timeSinceLastPacket = (millis() - millisAtFirstPacket - lastPacketTime) / 1000;
-    String timeStr = String(timeSinceLastPacket) + "s ago    ";
+    String timeStr = String(timeSinceLastPacket) + "s    ";
     tft.drawString(timeStr, 180, HEADER_HEIGHT + VALUE_HEIGHT * 3);
     
-    // Update stats and signal strength
+    // Update stats and signal strength (using full width)
     float snr = radio->getSNR();
-    String statsStr = String(totalPackets) + " tot, " + String(badPackets) + " bad, SNR:" + String(snr, 1) + "dB   ";
-    tft.drawString(statsStr, 180, HEADER_HEIGHT + VALUE_HEIGHT * 4);
+    String statsStr = String(totalPackets) + " packets, " + String(badPackets) + " errors, SNR: " + String(snr, 1) + "dB   ";
+    tft.drawString(statsStr, 80, HEADER_HEIGHT + VALUE_HEIGHT * 4);
     
     // Update battery voltage and percentage
     String batteryStr = String(batteryVoltage, 2) + "V " + String(batteryPercent) + "%   ";
