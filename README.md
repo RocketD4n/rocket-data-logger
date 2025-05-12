@@ -49,7 +49,7 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 The system transmits and displays the following data:
 - Current and maximum altitude
 - GPS coordinates and fix status
-- Battery voltage (via MAX17043 fuel gauge)
+- Battery voltage and charge percentage (via MAX17043 fuel gauge)
 - Temperature readings
 - Maximum G-force experienced
 - Launch state detection

@@ -25,6 +25,7 @@ struct GpsDataPacket {
     uint32_t longitude;
     uint16_t altitude;
     uint16_t batteryMillivolts;
+    uint8_t batteryPercent;
     uint8_t checksum;
 };
 

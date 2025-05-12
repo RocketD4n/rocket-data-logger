@@ -213,7 +213,8 @@ void sendGpsData() {
         packet.latitude = gps.location.lat() * 10000000;
         packet.longitude = gps.location.lng() * 10000000;
         packet.altitude = (uint16_t)(gps.altitude.meters() * 10.0f);
-        packet.batteryMillivolts = (uint16_t)(lipo.voltage() * 1000.0f);
+        packet.batteryMillivolts = (uint16_t)(lipo.voltage() * 1000);
+        packet.batteryPercent = (uint8_t)lipo.percent();
         packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(GpsDataPacket) - 1);
         if (radio->transmit((uint8_t*)&packet, sizeof(packet)) != RADIOLIB_ERR_NONE) {
             Serial.println("Failed to send GPS data");

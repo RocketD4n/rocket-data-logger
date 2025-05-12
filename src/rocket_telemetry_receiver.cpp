@@ -30,6 +30,7 @@ float gpsAltitude = 0.0f;
 unsigned long lastPacketTime = 0;
 unsigned long millisAtFirstPacket = 0;
 float batteryVoltage = 0.0f;
+float batteryPercent = 0.0f;
 float maxG = 0.0f;
 bool launchState = false;
 float temperature = 0.0f;
@@ -101,8 +102,8 @@ void updateDisplay() {
     String statsStr = String(totalPackets) + " tot, " + String(badPackets) + " bad, " + String(badChecksums) + " crc    ";
     tft.drawString(statsStr, 180, HEADER_HEIGHT + VALUE_HEIGHT * 4);
     
-    // Update battery voltage
-    String batteryStr = String(batteryVoltage, 2) + "V    ";
+    // Update battery voltage and percentage
+    String batteryStr = String(batteryVoltage, 2) + "V " + String(batteryPercent) + "%   ";
     tft.drawString(batteryStr, RIGHT_COL + 60, HEADER_HEIGHT);
     
     // Update launch state
@@ -150,6 +151,7 @@ void processGpsPacket(uint8_t* data) {
     longitude = packet->longitude / 1000000.0f;
     gpsAltitude = packet->altitude;
     batteryVoltage = packet->batteryMillivolts / 1000.0f;
+    batteryPercent = packet->batteryPercent;
 
     
     if (millisAtFirstPacket == 0) {
