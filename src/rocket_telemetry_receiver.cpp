@@ -29,6 +29,11 @@ float longitude = 0.0f;
 float gpsAltitude = 0.0f;
 unsigned long lastPacketTime = 0;
 
+// Packet statistics
+uint32_t totalPackets = 0;
+uint32_t badPackets = 0;
+uint32_t badChecksums = 0;
+
 void setup() {
     Serial.begin(115200);
     
@@ -44,6 +49,7 @@ void setup() {
     tft.drawString("Max Alt:", 10, HEADER_HEIGHT + VALUE_HEIGHT);
     tft.drawString("GPS:", 10, HEADER_HEIGHT + VALUE_HEIGHT * 2);
     tft.drawString("Last Update:", 10, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+    tft.drawString("Packet Stats:", 10, HEADER_HEIGHT + VALUE_HEIGHT * 4);
     
     // Initialize CC1101
     Serial.print(F("[CC1101] Initializing ... "));
@@ -77,9 +83,43 @@ void updateDisplay() {
     unsigned long timeSinceLastPacket = (millis() - lastPacketTime) / 1000;
     String timeStr = String(timeSinceLastPacket) + "s ago    ";
     tft.drawString(timeStr, 120, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+    
+    // Update packet statistics
+    String statsStr = String(totalPackets) + " tot, " + String(badPackets) + " bad, " + String(badChecksums) + " crc    ";
+    tft.drawString(statsStr, 120, HEADER_HEIGHT + VALUE_HEIGHT * 4);
+}
+
+uint8_t calculateChecksum(uint8_t* data, size_t length) {
+    uint8_t checksum = 0;
+    for (size_t i = 0; i < length - 1; i++) { // -1 to exclude the checksum byte
+        checksum ^= data[i];
+    }
+    return checksum;
+}
+
+bool verifyPacket(uint8_t* data, size_t length) {
+    if (length < 2) { // Minimum packet size (version + type)
+        badPackets++;
+        return false;
+    }
+    
+    // Verify checksum
+    uint8_t expectedChecksum = calculateChecksum(data, length);
+    uint8_t receivedChecksum = data[length - 1];
+    if (expectedChecksum != receivedChecksum) {
+        badChecksums++;
+        Serial.printf("Checksum mismatch: expected 0x%02X, got 0x%02X\n", expectedChecksum, receivedChecksum);
+        return false;
+    }
+    
+    return true;
 }
 
 void processGpsPacket(uint8_t* data) {
+    if (!verifyPacket(data, sizeof(GpsDataPacket))) {
+        return;
+    }
+    
     GpsDataPacket* packet = (GpsDataPacket*)data;
     
     // Convert fixed-point coordinates back to floating point
@@ -92,6 +132,10 @@ void processGpsPacket(uint8_t* data) {
 }
 
 void processAltitudePacket(uint8_t* data) {
+    if (!verifyPacket(data, sizeof(AltitudePacket))) {
+        return;
+    }
+    
     AltitudePacket* packet = (AltitudePacket*)data;
     
     currentAltitude = packet->currentAltitude;
@@ -106,9 +150,12 @@ void loop() {
     int packetSize = radio->receive(data, MAX_PACKET_SIZE);
     
     if (packetSize > 0) {
+        totalPackets++;
+        
         // Check packet version
         if (data[0] != PROTOCOL_VERSION) {
             Serial.println(F("Invalid protocol version"));
+            badPackets++;
             return;
         }
         

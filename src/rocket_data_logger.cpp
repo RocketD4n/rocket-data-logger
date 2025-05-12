@@ -196,7 +196,7 @@ void sendGpsData() {
         GpsDataPacket packet;
         packet.version = PROTOCOL_VERSION;
         packet.packetType = GPS_DATA_PACKET;
-        packet.timestamp = micros();
+        packet.timestamp = millis();
         packet.latitude = gps.location.lat() * 10000000;
         packet.longitude = gps.location.lng() * 10000000;
         packet.altitude = gps.altitude.meters();
@@ -205,7 +205,7 @@ void sendGpsData() {
         uint8_t checksum = 0;
         uint8_t* ptr = (uint8_t*)&packet;
         for (uint8_t i = 0; i < sizeof(packet) - 1; i++) {
-            checksum += ptr[i];
+            checksum ^= ptr[i];
         }
         packet.checksum = checksum;
         
@@ -229,7 +229,7 @@ void sendAltitudeData() {
     AltitudePacket packet;
     packet.version = PROTOCOL_VERSION;
     packet.packetType = ALTITUDE_PACKET;
-    packet.timestamp = micros();
+    packet.timestamp = millis();
     packet.currentAltitude = currentAltitude;
     packet.maxAltitude = maxAltitude;
     
@@ -237,7 +237,7 @@ void sendAltitudeData() {
     uint8_t checksum = 0;
     uint8_t* ptr = (uint8_t*)&packet;
     for (uint8_t i = 0; i < sizeof(packet) - 1; i++) {
-        checksum += ptr[i];
+        checksum ^= ptr[i];
     }
     packet.checksum = checksum;
     
