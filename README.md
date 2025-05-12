@@ -1,21 +1,25 @@
 # Rocket Data Logger
 
-This project is a rocket telemetry system that logs GPS data, altitude, and IMU sensor readings, and transmits this data wirelessly using a CC1101 radio module.
+This project is a rocket telemetry system that logs GPS data, altitude, and IMU sensor readings, and transmits this data wirelessly using either a CC1101 or SX1278 (LoRa) radio module. It also logs to a local SD card.
 
 ## Hardware Requirements
 
 ### Data Logger (Rocket)
-- NodeMCU v2 (ESP8266)
-- CC1101 433MHz Transmitter
+- NodeMCU v2 (ESP8266) and power supply
+- Either:
+  - CC1101 433MHz Transmitter, or
+  - SX1278 433MHz LoRa Transmitter
 - GPS Module
-- BMP180/BMP085 Pressure Sensor
-- MPU6050 IMU
+- BMP180/BMP085 Pressure and Temperature Sensor
+- MPU6050 IMU (Accelerometer and Gyroscope)
 - SD Card Module
-- Relay Module (for deployment)
+- 2* Relay Modules (for parachute deployment)
 
 ### Telemetry Receiver (Ground Station)
-- ESP32 Dev Board
-- CC1101 433MHz Receiver
+- ESP32 Dev Board and power supply
+- Either:
+  - CC1101 433MHz Receiver, or
+  - SX1278 433MHz LoRa Receiver
 - 1.8" TFT Display (ST7735)
 
 ## Pin Configuration
@@ -23,9 +27,9 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 ### Data Logger (NodeMCU) Pins
 | Function | NodeMCU Pin | GPIO |
 |----------|-------------|------|
-| CC1101 CS | D0 | 16 |
-| CC1101 GDO0 | D5 | 14 |
-| CC1101 GDO2 | D8 | 15 |
+| Radio CS | D0 | 16 |
+| Radio DIO0/GDO0 | D5 | 14 |
+| Radio RST/DIO2 | D8 | 15 |
 | GPS RX | D1 | 5 |
 | GPS TX | D2 | 4 |
 | SD Card CS | D8 | 15 |
@@ -37,6 +41,34 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 | Backup Relay | D7 | 13 |
 | LED | D4 | 2 |
 
+## Radio Options
+
+### CC1101
+- Simple FSK/OOK transceiver
+- Good for shorter range (up to ~100m with clear line of sight)
+- Higher data rates possible
+- Lower power consumption
+- Simpler to configure
+
+### SX1278 (LoRa)
+- Long-range spread spectrum modulation
+- Optimized for 2km+ range with clear line of sight
+- Configuration:
+  - Spreading Factor: 10 (balance of range and speed)
+  - Coding Rate: 4/8 (better error correction)
+  - Preamble Length: 12 symbols
+  - Maximum Power: 20 dBm (100 mW)
+
+Important notes for SX1278 maximum power operation:
+1. Must use PA_BOOST pin (not RFO) to achieve 20 dBm output
+2. Power supply should handle ~120mA current draw during transmission
+3. Check local regulations for maximum allowed power output
+4. Consider heat dissipation at maximum power if transmitting frequently
+5. Expected performance:
+   - Range: 2-5km+ with line of sight
+   - Data Rate: ~0.5-1 kbps effective throughput
+   - Latency: ~100-200ms per transmission
+
 ## Communication Protocol
 
 ### Packet Structure
@@ -46,7 +78,7 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 struct GpsDataPacket {
     uint8_t version;        // Protocol version
     uint8_t packetType;     // 0x01 for GPS data
-    uint32_t timestamp;     // Microseconds since startup
+    uint32_t timestamp;     // Milliseconds since startup
     uint32_t latitude;      // Fixed point (x10,000,000)
     uint32_t longitude;     // Fixed point (x10,000,000)
     uint16_t altitude;      // Meters
@@ -59,7 +91,7 @@ struct GpsDataPacket {
 struct AltitudePacket {
     uint8_t version;        // Protocol version
     uint8_t packetType;     // 0x02 for altitude data
-    uint32_t timestamp;     // Microseconds since startup
+    uint32_t timestamp;     // Milliseconds since startup
     uint16_t currentAltitude; // Current altitude in meters
     uint16_t maxAltitude;   // Maximum recorded altitude
     uint8_t checksum;       // Packet checksum
@@ -136,8 +168,9 @@ struct AltitudePacket {
 | TFT CS | CS | 15 |
 | TFT DC | DC | 2 |
 | TFT RST | RST | 4 |
-| CC1101 CS | CS | 5 |
-| CC1101 GDO0 | GDO0 | 4 |
+| Radio CS | CS | 5 |
+| Radio DIO0/GDO0 | DIO0 | 4 |
+| Radio RST/DIO2 | RST | 16 |
 
 ## Dependencies
 
