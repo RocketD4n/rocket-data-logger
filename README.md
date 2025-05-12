@@ -20,7 +20,7 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 - Either:
   - CC1101 433MHz Receiver, or
   - SX1278 433MHz LoRa Receiver
-- 1.8" TFT Display (ST7735)
+- 2.8" TFT Display (ILI9341)
 
 ## Pin Configuration
 

@@ -1,6 +1,6 @@
 #define USER_SETUP_INFO "User_Setup"
 
-#define ST7735_DRIVER
+#define ILI9341_DRIVER
 
 #define TFT_MISO 19  // ESP32 GPIO19
 #define TFT_MOSI 23  // ESP32 GPIO23
@@ -23,8 +23,8 @@
 #define ESP32_PARALLEL
 
 // Display driver configuration
-#define TFT_WIDTH  128
-#define TFT_HEIGHT 160
+#define TFT_WIDTH  320
+#define TFT_HEIGHT 240
 
 // Other options
 #define SPI_FREQUENCY  27000000

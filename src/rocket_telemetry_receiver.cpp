@@ -15,8 +15,8 @@ TFT_eSPI tft = TFT_eSPI();
 Radio* radio = new CC1101Radio(CC1101_CS, CC1101_GDO0, RADIOLIB_NC);
 
 // Display layout constants
-#define HEADER_HEIGHT 30
-#define VALUE_HEIGHT 25
+#define HEADER_HEIGHT 40
+#define VALUE_HEIGHT 35
 #define LABEL_COLOR TFT_YELLOW
 #define VALUE_COLOR TFT_WHITE
 
@@ -45,11 +45,11 @@ void setup() {
     
     // Draw static labels
     tft.setTextColor(LABEL_COLOR);
-    tft.drawString("Current Alt:", 10, HEADER_HEIGHT);
-    tft.drawString("Max Alt:", 10, HEADER_HEIGHT + VALUE_HEIGHT);
-    tft.drawString("GPS:", 10, HEADER_HEIGHT + VALUE_HEIGHT * 2);
-    tft.drawString("Last Update:", 10, HEADER_HEIGHT + VALUE_HEIGHT * 3);
-    tft.drawString("Packet Stats:", 10, HEADER_HEIGHT + VALUE_HEIGHT * 4);
+    tft.drawString("Current Alt:", 20, HEADER_HEIGHT);
+    tft.drawString("Max Alt:", 20, HEADER_HEIGHT + VALUE_HEIGHT);
+    tft.drawString("GPS:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 2);
+    tft.drawString("Last Update:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+    tft.drawString("Packet Stats:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 4);
     
     // Initialize radio
     Serial.print(F("[Radio] Initializing ... "));
@@ -72,21 +72,21 @@ void updateDisplay() {
     tft.setTextColor(VALUE_COLOR, TFT_BLACK);
     
     // Update altitude values
-    tft.drawString(String(currentAltitude, 1) + "m    ", 120, HEADER_HEIGHT);
-    tft.drawString(String(maxAltitude, 1) + "m    ", 120, HEADER_HEIGHT + VALUE_HEIGHT);
+    tft.drawString(String(currentAltitude, 1) + "m    ", 180, HEADER_HEIGHT);
+    tft.drawString(String(maxAltitude, 1) + "m    ", 180, HEADER_HEIGHT + VALUE_HEIGHT);
     
     // Update GPS coordinates
     String gpsStr = String(latitude, 6) + ", " + String(longitude, 6);
-    tft.drawString(gpsStr + "    ", 120, HEADER_HEIGHT + VALUE_HEIGHT * 2);
+    tft.drawString(gpsStr + "    ", 180, HEADER_HEIGHT + VALUE_HEIGHT * 2);
     
     // Update last packet time
     unsigned long timeSinceLastPacket = (currentPacketTime - lastPacketTime) / 1000;
     String timeStr = String(timeSinceLastPacket) + "s ago    ";
-    tft.drawString(timeStr, 120, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+    tft.drawString(timeStr, 180, HEADER_HEIGHT + VALUE_HEIGHT * 3);
     
     // Update packet statistics
     String statsStr = String(totalPackets) + " tot, " + String(badPackets) + " bad, " + String(badChecksums) + " crc    ";
-    tft.drawString(statsStr, 120, HEADER_HEIGHT + VALUE_HEIGHT * 4);
+    tft.drawString(statsStr, 180, HEADER_HEIGHT + VALUE_HEIGHT * 4);
 }
 
 uint8_t calculateChecksum(uint8_t* data, size_t length) {
