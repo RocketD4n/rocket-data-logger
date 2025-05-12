@@ -1,8 +1,6 @@
 /*
  *  TODO:
  *  - receiver to send to rocket command to make sound
- *  - rocket to transmit, max G and launch state
- *  - receiver to log SNR
  *  - receiver to offer binding options
  *  - receiver to send to rocket parameters/constants
  */

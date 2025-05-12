@@ -98,8 +98,9 @@ void updateDisplay() {
     String timeStr = String(timeSinceLastPacket) + "s ago    ";
     tft.drawString(timeStr, 180, HEADER_HEIGHT + VALUE_HEIGHT * 3);
     
-    // Update packet statistics
-    String statsStr = String(totalPackets) + " tot, " + String(badPackets) + " bad, " + String(badChecksums) + " crc    ";
+    // Update stats and signal strength
+    float snr = radio->getSNR();
+    String statsStr = String(totalPackets) + " tot, " + String(badPackets) + " bad, SNR:" + String(snr, 1) + "dB   ";
     tft.drawString(statsStr, 180, HEADER_HEIGHT + VALUE_HEIGHT * 4);
     
     // Update battery voltage and percentage

@@ -16,6 +16,7 @@ public:
     bool available() override;
     void sleep() override;
     void wake() override;
+    float getSNR() override;  // For CC1101, we approximate SNR from RSSI
 
 private:
     CC1101 radio;

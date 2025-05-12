@@ -28,6 +28,9 @@ public:
     
     // Wake up radio from sleep mode
     virtual void wake() = 0;
+    
+    // Get Signal-to-Noise Ratio in dB
+    virtual float getSNR() = 0;
 };
 
 #endif // RADIO_INTERFACE_H

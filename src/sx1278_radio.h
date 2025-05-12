@@ -16,6 +16,7 @@ public:
     bool available() override;
     void sleep() override;
     void wake() override;
+    float getSNR() override;  // SX1278 has native SNR support
 
 private:
     SX1278 radio;

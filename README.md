@@ -53,7 +53,7 @@ The system transmits and displays the following data:
 - Temperature readings
 - Maximum G-force experienced
 - Launch state detection
-- Packet statistics
+- Packet statistics and signal quality (SNR)
 
 ## Radio Options
 

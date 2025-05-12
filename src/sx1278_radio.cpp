@@ -80,3 +80,9 @@ void SX1278Radio::wake() {
         radio.standby();
     }
 }
+
+float SX1278Radio::getSNR() {
+    if (!isInitialized) return -200.0f;
+    // SX1278 provides SNR directly in dB
+    return radio.getSNR();
+}

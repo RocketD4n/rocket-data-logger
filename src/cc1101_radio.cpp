@@ -58,3 +58,15 @@ void CC1101Radio::wake() {
         radio.standby();
     }
 }
+
+float CC1101Radio::getSNR() {
+    if (!isInitialized) return -200.0f;
+    // For CC1101, we approximate SNR from RSSI
+    // RSSI above -60dBm is considered very good (high SNR)
+    // RSSI below -100dBm is considered very poor (low SNR)
+    // Map this range to a reasonable SNR range
+    float rssi = radio.getRSSI();
+    if (rssi > -60) return 30.0f;  // Maximum SNR
+    if (rssi < -100) return 0.0f;   // Minimum SNR
+    return (rssi + 100.0f) * 0.75f; // Linear mapping from -100..-60 to 0..30
+}
