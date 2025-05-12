@@ -27,8 +27,24 @@ unsigned long lastFlush = 0;
 bool launchDetected = false;
 char line[256];
 
-#define LED_PIN 2 // Built-in LED on NodeMCU (D4)
+// RGB LED pins
+#define LED_RED_PIN 0    // D3 on NodeMCU
+#define LED_GREEN_PIN 2  // D4 on NodeMCU (Built-in LED)
+#define LED_BLUE_PIN 13  // D7 on NodeMCU
+
 #define PRIMARY_RELAY_PIN 12 // D6 on NodeMCU
+
+// LED color functions
+void setLedColor(bool red, bool green, bool blue) {
+    digitalWrite(LED_RED_PIN, red);          // Active high (external LED)
+    digitalWrite(LED_GREEN_PIN, green);      // Active high (external LED)
+    digitalWrite(LED_BLUE_PIN, blue);         // Active high (external LED)
+}
+
+void setLedYellow() { setLedColor(true, true, false); }
+void setLedRed() { setLedColor(true, false, false); }
+void setLedGreen() { setLedColor(false, true, false); }
+void setLedBlue() { setLedColor(false, false, true); }
 #define BACKUP_RELAY_PIN 13 // D7 on NodeMCU
 #define ALTITUDE_DROP_THRESHOLD 10.0f // meters
 #define BACKUP_DELAY 1000000 // 1 second in microseconds
@@ -46,19 +62,6 @@ unsigned long primaryRelayActivationTime = 0;
 TinyGPSPlus gps;
 SoftwareSerial gpsSerial(5, 4); // D1 (GPIO5) for RX, D2 (GPIO4) for TX
 
-int countFiles(File dir) {
-  int count = 0;
-  while (true) {
-    File entry = dir.openNextFile();
-    if (!entry) break;
-    if (!entry.isDirectory()) {
-      count++;
-    }
-    entry.close();
-  }
-  return count;
-}
-
 void getAltitudeAndTemp(float& altitude, float& temp) {
   sensors_event_t event;
   bmp.getEvent(&event);
@@ -67,6 +70,12 @@ void getAltitudeAndTemp(float& altitude, float& temp) {
 }
 
 void setup() {
+  // Initialize RGB LED pins
+  pinMode(LED_RED_PIN, OUTPUT);
+  pinMode(LED_GREEN_PIN, OUTPUT);
+  pinMode(LED_BLUE_PIN, OUTPUT);
+  setLedYellow();  // Yellow during initialization
+
   // Initialize radio
   if (!radio->begin()) {
     Serial.println("Failed to initialize radio");
@@ -85,9 +94,6 @@ void setup() {
   Wire.begin(D2, D1);
   Serial.begin(74880);
   
-  // Initialize LED pin
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);  // Start with LED off
 
   // Initialize relay pins
   pinMode(PRIMARY_RELAY_PIN, OUTPUT);
@@ -98,20 +104,23 @@ void setup() {
   Serial.println("Initializing MPU6050...");
   if (!mpu.begin()) {
     Serial.println("MPU6050 initialization failed!");
-    return;
+    setLedRed();  // Red indicates error
+    while (1);
   }
   Serial.println("MPU6050 ready!");
 
   if (!bmp.begin()) {
     Serial.println("BMP180 not detected. Check wiring.");
-    return;
+    setLedRed();  // Red indicates error
+    while (1);
   }
   Serial.println("BMP180 ready.");
   
   Serial.println("Initializing SD card");
   if (!SD.begin(15)) {
     Serial.println("Initialization failed!");
-    return;
+    setLedRed();  // Red indicates error
+    while (1);
   }
 
   Serial.println("Waiting for GPS....");
@@ -144,8 +153,7 @@ void setup() {
     delay(1000);
   }
   
-  Serial.println("Initialization completed");
-
+ 
   // Get GPS date and time
   while (gpsSerial.available() > 0) {
     gps.encode(gpsSerial.read());
@@ -173,7 +181,9 @@ void setup() {
     Serial.println("done");
   }
 
-  Serial.println("Waiting for launch....");
+  Serial.println("Initialization completed");
+  setLedGreen();  // Green indicates successful initialization with GPS fix
+ Serial.println("Waiting for launch....");
 }
 
 void sendGpsData() {
@@ -320,7 +330,7 @@ void loop() {
     if (!launchDetected && aTotal > 1.7) { 
       Serial.println("Launch detected!");
       launchDetected = true;
-      digitalWrite(LED_PIN, HIGH);  // Turn on LED when launch is detected
+      setLedBlue();  // Blue indicates launch detected
     }
     
     float altitude, temperature;
