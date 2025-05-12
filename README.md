@@ -23,6 +23,22 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
   - SX1278 433MHz LoRa Receiver
 - 2.8" TFT Display (ILI9341)
 
+## Display Layout
+
+The ground station's 320x240 pixel display shows real-time telemetry data in an easy-to-read format:
+
+```
++------------------------------------------------------+
+|                                                       |
+| Alt:      123.4m               Battery: 3.70V 85%     |
+| Max Alt:  456.7m               Launch:  Waiting...    |
+| GPS:      12.34567,-12.34567   Temp:    25.1C        |
+| Staleness: 5s                  Max-G:   3.2g         |
+| Stats: 123 packets, 12 errors, SNR: 15.1dB           |
+|                                                       |
++------------------------------------------------------+
+```
+
 ## Pin Configuration
 
 ### Data Logger (NodeMCU) Pins
