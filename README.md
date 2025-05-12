@@ -14,6 +14,7 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 - MPU6050 IMU (Accelerometer and Gyroscope)
 - SD Card Module
 - 2* Relay Modules (for parachute deployment)
+- MAX17043 LiPo Battery Fuel Gauge
 
 ### Telemetry Receiver (Ground Station)
 - ESP32 Dev Board and power supply
@@ -37,9 +38,22 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 | MPU6050 SCL | D1 | 5 |
 | BMP180 SDA | D2 | 4 |
 | BMP180 SCL | D1 | 5 |
+| MAX17043 SDA | D2 | 4 |
+| MAX17043 SCL | D1 | 5 |
 | Primary Relay | D6 | 12 |
 | Backup Relay | D7 | 13 |
 | LED | D4 | 2 |
+
+## Telemetry Data
+
+The system transmits and displays the following data:
+- Current and maximum altitude
+- GPS coordinates and fix status
+- Battery voltage (via MAX17043 fuel gauge)
+- Temperature readings
+- Maximum G-force experienced
+- Launch state detection
+- Packet statistics
 
 ## Radio Options
 
