@@ -4,6 +4,7 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 
 ## Hardware Requirements
 
+### Data Logger (Rocket)
 - NodeMCU v2 (ESP8266)
 - CC1101 433MHz Transmitter
 - GPS Module
@@ -12,9 +13,14 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 - SD Card Module
 - Relay Module (for deployment)
 
+### Telemetry Receiver (Ground Station)
+- ESP32 Dev Board
+- CC1101 433MHz Receiver
+- 1.8" TFT Display (ST7735)
+
 ## Pin Configuration
 
-### NodeMCU Pins
+### Data Logger (NodeMCU) Pins
 | Function | NodeMCU Pin | GPIO |
 |----------|-------------|------|
 | CC1101 CS | D0 | 16 |
@@ -109,19 +115,42 @@ struct AltitudePacket {
 
 ## Setup Instructions
 
+### Data Logger Setup
 1. Install PlatformIO
 2. Clone this repository
 3. Connect hardware according to pin configuration
-4. Upload code to NodeMCU
+4. Upload code using: `pio run -e rocket_logger -t upload`
 5. Configure GPS module for 9600 baud
 6. Insert SD card for data logging
 
+### Telemetry Receiver Setup
+1. Connect hardware according to pin configuration below
+2. Upload code using: `pio run -e rocket_receiver -t upload`
+
+### Receiver Pin Configuration (ESP32)
+| Function | ESP32 Pin | GPIO |
+|----------|-----------|------|
+| TFT MISO | MISO | 19 |
+| TFT MOSI | MOSI | 23 |
+| TFT SCLK | SCK | 18 |
+| TFT CS | CS | 15 |
+| TFT DC | DC | 2 |
+| TFT RST | RST | 4 |
+| CC1101 CS | CS | 5 |
+| CC1101 GDO0 | GDO0 | 4 |
+
 ## Dependencies
 
+### Data Logger
 - Adafruit MPU6050
 - Adafruit BMP085 Unified
 - TinyGPSPlus
-- CC1101
+- RadioLib (CC1101)
 - SPI
 - Wire
 - SD
+
+### Telemetry Receiver
+- TFT_eSPI
+- RadioLib (CC1101)
+- SPI
