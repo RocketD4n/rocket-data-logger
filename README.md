@@ -25,17 +25,41 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 
 ## Display Layout
 
-The ground station's 320x240 pixel display shows real-time telemetry data in an easy-to-read format:
+The ground station features a multi-page touchscreen display with navigation buttons in the top corners. Users can switch between pages by tapping the left (<) or right (>) buttons.
+
+### Page 1: Main Data Display
+
+The main page shows real-time telemetry data in an easy-to-read format:
 
 ```
 +------------------------------------------------------+
-|                                                       |
+| <                                                  > |
 | Alt:      123.4m               Battery: 3.70V 85%     |
 | Max Alt:  456.7m               Launch:  Waiting...    |
 | GPS:      12.34567,-12.34567   Temp:    25.1C        |
 | Staleness: 5s                  Max-G:   3.2g         |
 | Stats: 123 packets, 12 errors, SNR: 15.1dB           |
 |                                                       |
++------------------------------------------------------+
+```
+
+### Page 2: Altitude Graph
+
+The second page displays a real-time graph of altitude versus time, allowing users to visualize the rocket's flight profile:
+
+```
++------------------------------------------------------+
+| <           Altitude vs Time                       > |
+|                                                       |
+|    ^                                                  |
+|    |                                                  |
+| A  |               /\                                 |
+| l  |              /  \                                |
+| t  |             /    \                               |
+|    |            /      \                              |
+|    |           /        \___                          |
+|    +---------------------------------------->         |
+|                      Time (s)                         |
 +------------------------------------------------------+
 ```
 

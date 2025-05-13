@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <TFT_eSPI.h>
+#include <XPT2046_Touchscreen.h>
 #include "rocket_telemetry_protocol.h"
 #include "cc1101_radio.h"
 
@@ -8,11 +9,23 @@
 #define CC1101_CS 5    // GPIO5
 #define CC1101_GDO0 4  // GPIO4
 
+// Touch screen configuration
+#define TOUCH_CS 21
+XPT2046_Touchscreen ts(TOUCH_CS);
+
 // Initialize TFT display
 TFT_eSPI tft = TFT_eSPI();
 
 // Radio instance using CC1101
 Radio* radio = new CC1101Radio(CC1101_CS, CC1101_GDO0, RADIOLIB_NC);
+
+// Forward declarations of functions
+void drawNavigationButtons();
+void drawMainPage();
+void updateMainPageValues();
+void drawGraphPage();
+void updateGraph();
+void updateDisplay();
 
 // Display layout constants
 #define HEADER_HEIGHT 30
@@ -20,6 +33,21 @@ Radio* radio = new CC1101Radio(CC1101_CS, CC1101_GDO0, RADIOLIB_NC);
 #define RIGHT_COL 180
 #define LABEL_COLOR TFT_YELLOW
 #define VALUE_COLOR TFT_WHITE
+
+// Navigation button constants
+#define NAV_BUTTON_WIDTH 40
+#define NAV_BUTTON_HEIGHT 40
+#define NAV_BUTTON_MARGIN 5
+#define NAV_BUTTON_COLOR TFT_BLUE
+
+// Graph constants
+#define GRAPH_X 50
+#define GRAPH_Y 50
+#define GRAPH_WIDTH 220
+#define GRAPH_HEIGHT 140
+#define GRAPH_COLOR TFT_GREEN
+#define AXIS_COLOR TFT_WHITE
+#define MAX_DATA_POINTS 100
 
 // Global variables for tracking data
 float currentAltitude = 0.0f;
@@ -35,6 +63,15 @@ float maxG = 0.0f;
 bool launchState = false;
 float temperature = 0.0f;
 
+// Display page control
+int currentPage = 0; // 0 = main data page, 1 = altitude graph page
+
+// Altitude history for graph
+float altitudeHistory[MAX_DATA_POINTS];
+unsigned long timeHistory[MAX_DATA_POINTS];
+int historyIndex = 0;
+int historyCount = 0;
+
 // Packet statistics
 uint32_t totalPackets = 0;
 uint32_t badPackets = 0;
@@ -49,21 +86,12 @@ void setup() {
     tft.fillScreen(TFT_BLACK);
     tft.setTextDatum(TL_DATUM);
     
-    // Draw labels
-    tft.setTextColor(LABEL_COLOR, TFT_BLACK);
-    // Left column
-    tft.drawString("Alt:", 20, HEADER_HEIGHT);
-    tft.drawString("Max Alt:", 20, HEADER_HEIGHT + VALUE_HEIGHT);
-    tft.drawString("GPS:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 2);
-    tft.drawString("Staleness:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 3);
-    // Right column
-    tft.drawString("Battery:", RIGHT_COL, HEADER_HEIGHT);
-    tft.drawString("Launch:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT);
-    tft.drawString("Temp:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT * 2);
-    tft.drawString("Max-G:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+    // Initialize touch screen
+    ts.begin();
+    ts.setRotation(3);
     
-    // Stats row (full width)
-    tft.drawString("Stats:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 4);
+    // Initialize the first page
+    drawMainPage();
 
     
     // Initialize radio
@@ -83,7 +111,55 @@ void setup() {
     Serial.println(F("Radio configured successfully!"));
 }
 
-void updateDisplay() {
+// Draw navigation buttons
+void drawNavigationButtons() {
+    // Left button (back)
+    tft.fillRoundRect(NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, 
+                     NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT, 5, NAV_BUTTON_COLOR);
+    tft.setTextColor(TFT_WHITE);
+    tft.setTextDatum(MC_DATUM); // Middle center
+    tft.drawString("<", NAV_BUTTON_MARGIN + NAV_BUTTON_WIDTH/2, 
+                  NAV_BUTTON_MARGIN + NAV_BUTTON_HEIGHT/2, 4);
+    
+    // Right button (forward)
+    tft.fillRoundRect(tft.width() - NAV_BUTTON_MARGIN - NAV_BUTTON_WIDTH, NAV_BUTTON_MARGIN, 
+                     NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT, 5, NAV_BUTTON_COLOR);
+    tft.drawString(">", tft.width() - NAV_BUTTON_MARGIN - NAV_BUTTON_WIDTH/2, 
+                  NAV_BUTTON_MARGIN + NAV_BUTTON_HEIGHT/2, 4);
+    
+    // Reset text alignment
+    tft.setTextDatum(TL_DATUM);
+}
+
+// Draw the main data page (page 0)
+void drawMainPage() {
+    tft.fillScreen(TFT_BLACK);
+    drawNavigationButtons();
+    
+    // Draw labels
+    tft.setTextColor(LABEL_COLOR, TFT_BLACK);
+    // Left column
+    tft.drawString("Alt:", 20, HEADER_HEIGHT);
+    tft.drawString("Max Alt:", 20, HEADER_HEIGHT + VALUE_HEIGHT);
+    tft.drawString("GPS:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 2);
+    tft.drawString("Staleness:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+    // Right column
+    tft.drawString("Battery:", RIGHT_COL, HEADER_HEIGHT);
+    tft.drawString("Launch:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT);
+    tft.drawString("Temp:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT * 2);
+    tft.drawString("Max-G:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+    
+    // Stats row (full width)
+    tft.drawString("Stats:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 4);
+    
+    // Update values
+    updateMainPageValues();
+}
+
+// Update just the values on the main page
+void updateMainPageValues() {
+    if (currentPage != 0) return;
+    
     tft.setTextColor(VALUE_COLOR, TFT_BLACK);
     
     // Update altitude values
@@ -119,6 +195,90 @@ void updateDisplay() {
     // Update max G-force
     String gStr = String(maxG, 1) + "g    ";
     tft.drawString(gStr, RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+}
+
+// Draw the altitude graph page (page 1)
+void drawGraphPage() {
+    tft.fillScreen(TFT_BLACK);
+    drawNavigationButtons();
+    
+    // Draw page title
+    tft.setTextColor(LABEL_COLOR, TFT_BLACK);
+    tft.drawString("Altitude vs Time", 100, 10);
+    
+    // Draw graph axes
+    tft.drawLine(GRAPH_X, GRAPH_Y, GRAPH_X, GRAPH_Y + GRAPH_HEIGHT, AXIS_COLOR); // Y-axis
+    tft.drawLine(GRAPH_X, GRAPH_Y + GRAPH_HEIGHT, GRAPH_X + GRAPH_WIDTH, GRAPH_Y + GRAPH_HEIGHT, AXIS_COLOR); // X-axis
+    
+    // Draw axis labels
+    tft.setTextColor(LABEL_COLOR, TFT_BLACK);
+    tft.drawString("Time (s)", GRAPH_X + GRAPH_WIDTH/2 - 30, GRAPH_Y + GRAPH_HEIGHT + 10);
+    
+    // Rotate text for Y-axis label
+    tft.setRotation(2); // Temporarily rotate to draw vertical text
+    tft.drawString("Altitude (m)", tft.height() - (GRAPH_Y + GRAPH_HEIGHT/2 + 30), tft.width() - GRAPH_X + 10);
+    tft.setRotation(3); // Restore rotation
+    
+    // Draw Y-axis scale
+    if (maxAltitude > 0) {
+        tft.setTextColor(AXIS_COLOR, TFT_BLACK);
+        tft.drawString("0", GRAPH_X - 20, GRAPH_Y + GRAPH_HEIGHT - 5);
+        tft.drawString(String(maxAltitude, 0), GRAPH_X - 25, GRAPH_Y - 5);
+        tft.drawString(String(maxAltitude/2, 0), GRAPH_X - 25, GRAPH_Y + GRAPH_HEIGHT/2 - 5);
+    }
+    
+    // Update the graph with current data
+    updateGraph();
+}
+
+// Update the altitude graph
+void updateGraph() {
+    if (currentPage != 1 || historyCount == 0) return;
+    
+    // Clear graph area (not the axes)
+    tft.fillRect(GRAPH_X + 1, GRAPH_Y, GRAPH_WIDTH - 1, GRAPH_HEIGHT, TFT_BLACK);
+    
+    // Find max time for scaling X-axis
+    unsigned long maxTime = 0;
+    for (int i = 0; i < historyCount; i++) {
+        int idx = (historyIndex - historyCount + i + MAX_DATA_POINTS) % MAX_DATA_POINTS;
+        if (timeHistory[idx] > maxTime) {
+            maxTime = timeHistory[idx];
+        }
+    }
+    
+    // Draw time scale on X-axis
+    if (maxTime > 0) {
+        tft.setTextColor(AXIS_COLOR, TFT_BLACK);
+        tft.drawString("0", GRAPH_X - 5, GRAPH_Y + GRAPH_HEIGHT + 5);
+        tft.drawString(String(maxTime/1000), GRAPH_X + GRAPH_WIDTH - 15, GRAPH_Y + GRAPH_HEIGHT + 5);
+    }
+    
+    // Plot the data points
+    if (historyCount > 1 && maxAltitude > 0 && maxTime > 0) {
+        for (int i = 1; i < historyCount; i++) {
+            int idx1 = (historyIndex - historyCount + i - 1 + MAX_DATA_POINTS) % MAX_DATA_POINTS;
+            int idx2 = (historyIndex - historyCount + i + MAX_DATA_POINTS) % MAX_DATA_POINTS;
+            
+            // Scale data points to graph dimensions
+            int x1 = GRAPH_X + (timeHistory[idx1] * GRAPH_WIDTH) / maxTime;
+            int y1 = GRAPH_Y + GRAPH_HEIGHT - (altitudeHistory[idx1] * GRAPH_HEIGHT) / maxAltitude;
+            int x2 = GRAPH_X + (timeHistory[idx2] * GRAPH_WIDTH) / maxTime;
+            int y2 = GRAPH_Y + GRAPH_HEIGHT - (altitudeHistory[idx2] * GRAPH_HEIGHT) / maxAltitude;
+            
+            // Draw line between points
+            tft.drawLine(x1, y1, x2, y2, GRAPH_COLOR);
+        }
+    }
+}
+
+// Update display based on current page
+void updateDisplay() {
+    if (currentPage == 0) {
+        updateMainPageValues();
+    } else if (currentPage == 1) {
+        updateGraph();
+    }
 }
     
 
@@ -182,10 +342,63 @@ void processAltitudePacket(uint8_t* data) {
     }  
     lastPacketTime = packet->timestamp;
     
+    // Store altitude data for graph
+    altitudeHistory[historyIndex] = currentAltitude;
+    timeHistory[historyIndex] = millis() - millisAtFirstPacket;
+    historyIndex = (historyIndex + 1) % MAX_DATA_POINTS;
+    if (historyCount < MAX_DATA_POINTS) {
+        historyCount++;
+    }
+    
     updateDisplay();
 }
 
+// Check if touch is within button area
+bool isTouchInButton(uint16_t x, uint16_t y, uint16_t btnX, uint16_t btnY, uint16_t btnW, uint16_t btnH) {
+    return (x >= btnX && x <= btnX + btnW && y >= btnY && y <= btnY + btnH);
+}
+
+// Handle touch events
+void handleTouch() {
+    if (ts.touched()) {
+        TS_Point p = ts.getPoint();
+        
+        // Convert touch coordinates to screen coordinates based on rotation
+        uint16_t touchX = p.x;
+        uint16_t touchY = p.y;
+        
+        // Check if left navigation button was pressed
+        if (isTouchInButton(touchX, touchY, NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, 
+                           NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
+            // Go to previous page (with wrap-around)
+            currentPage = (currentPage + 1) % 2;
+            if (currentPage == 0) {
+                drawMainPage();
+            } else {
+                drawGraphPage();
+            }
+            delay(300); // Debounce
+        }
+        
+        // Check if right navigation button was pressed
+        else if (isTouchInButton(touchX, touchY, tft.width() - NAV_BUTTON_MARGIN - NAV_BUTTON_WIDTH, 
+                                NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
+            // Go to next page (with wrap-around)
+            currentPage = (currentPage + 1) % 2;
+            if (currentPage == 0) {
+                drawMainPage();
+            } else {
+                drawGraphPage();
+            }
+            delay(300); // Debounce
+        }
+    }
+}
+
 void loop() {
+    // Handle touch events
+    handleTouch();
+    
     uint8_t data[MAX_PACKET_SIZE];
     int packetSize = radio->receive(data, MAX_PACKET_SIZE);
     
