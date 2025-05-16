@@ -11,7 +11,6 @@
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BMP085_U.h>
-#include <SoftwareSerial.h>
 #include <TinyGPS++.h>
 #include <MAX1704X.h>
 
@@ -66,7 +65,7 @@ bool relayActive = false;
 unsigned long primaryRelayActivationTime = 0;
 
 TinyGPSPlus gps;
-SoftwareSerial gpsSerial(5, 4); // D1 (GPIO5) for RX, D2 (GPIO4) for TX
+// Using hardware Serial for GPS
 
 void getAltitudeAndTemp(float& altitude, float& temp) {
   sensors_event_t event;
@@ -135,12 +134,12 @@ void setup() {
   Serial.println("MAX17043 ready.");
 
   Serial.println("Waiting for GPS....");
-  gpsSerial.begin(9600);
+  Serial.begin(9600);  // Hardware serial for GPS
   
   // Wait for GPS fix and altitude
   while (true) {
-    while (gpsSerial.available() > 0) {
-      gps.encode(gpsSerial.read());
+    while (Serial.available() > 0) {
+      gps.encode(Serial.read());
     }
     
     if (gps.location.isUpdated() && gps.altitude.isValid()) {
@@ -168,8 +167,8 @@ void setup() {
   
  
   // Get GPS date and time
-  while (gpsSerial.available() > 0) {
-    gps.encode(gpsSerial.read());
+  while (Serial.available() > 0) {
+    gps.encode(Serial.read());
   }
   
   // Format filename as YYYYMMDD_HHMMSS.csv
@@ -201,8 +200,8 @@ void setup() {
 
 void sendGpsData() {
     // Get GPS data
-    while (gpsSerial.available()) {
-        gps.encode(gpsSerial.read());
+    while (Serial.available()) {
+        gps.encode(Serial.read());
     }
     
     if (gps.location.isValid()) {
@@ -299,8 +298,8 @@ void loop() {
     }
     
     // Process GPS data
-    while (gpsSerial.available() > 0) {
-        gps.encode(gpsSerial.read());
+    while (Serial.available() > 0) {
+        gps.encode(Serial.read());
     }
     
     // Process IMU data

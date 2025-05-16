@@ -71,8 +71,8 @@ The second page displays a real-time graph of altitude versus time, allowing use
 | Radio CS | D0 | 16 |
 | Radio DIO0/GDO0 | D5 | 14 |
 | Radio RST/DIO2 | D8 | 15 |
-| GPS RX | D1 | 5 |
-| GPS TX | D2 | 4 |
+| GPS RX | RX | 3 |
+| GPS TX | TX | 1 |
 | SD Card CS | D8 | 15 |
 | MPU6050 SDA | D2 | 4 |
 | MPU6050 SCL | D1 | 5 |
