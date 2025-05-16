@@ -252,16 +252,33 @@ void sendAltitudeData() {
 }
 
 void loop() {
-    // Send GPS data every second
+        // Get current battery percentage
+    uint8_t batteryPercent = (uint8_t)lipo.percent();
+    bool lowBatteryMode = batteryPercent < 50;
+    
+    // Send GPS data (every 10 seconds in low battery mode, every second in normal mode)
     static unsigned long lastGpsSend = 0;
-    if (millis() - lastGpsSend >= 1000) {
+    unsigned long gpsInterval = lowBatteryMode ? 10000 : 1000;
+    
+    if (millis() - lastGpsSend >= gpsInterval) {
+        // Wake up radio if it was sleeping
+        if (lowBatteryMode) {
+            radio->wake();
+            delay(10); // Small delay to ensure radio is ready
+        }
+        
         sendGpsData();
         lastGpsSend = millis();
+        
+        // Put radio to sleep in low battery mode
+        if (lowBatteryMode) {
+            radio->sleep();
+        }
     }
     
-    // Send altitude data every 100ms
+    // Send altitude data every 100ms (only in normal battery mode)
     static unsigned long lastAltSend = 0;
-    if (millis() - lastAltSend >= 100) {
+    if (!lowBatteryMode && millis() - lastAltSend >= 100) {
         sendAltitudeData();
         lastAltSend = millis();
     }
