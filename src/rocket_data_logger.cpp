@@ -201,8 +201,8 @@ void setup() {
 
 void sendGpsData() {
     // Get GPS data
-    if (Serial1.available()) {
-        gps.encode(Serial1.read());
+    while (gpsSerial.available()) {
+        gps.encode(gpsSerial.read());
     }
     
     if (gps.location.isValid()) {
@@ -339,8 +339,6 @@ void loop() {
       setLedBlue();  // Blue indicates launch detected
     }
     
-   
-
     // Check altitude drop
     if (lastAltitude > 0.0f) {
       float altitudeChange = lastAltitude - altitude;
