@@ -7,7 +7,7 @@
 class CC1101Radio : public Radio {
 public:
     CC1101Radio(int csPin, int gdo0Pin, int gdo2Pin);
-    virtual ~CC1101Radio() = default;
+    virtual ~CC1101Radio();
     
     bool begin() override;
     bool configure(float frequency, float bandwidth, uint8_t power) override;
@@ -17,9 +17,18 @@ public:
     void sleep() override;
     void wake() override;
     float getSNR() override;  // For CC1101, we approximate SNR from RSSI
+    bool setOutputPower(float power) override;
+    float getCurrentPower() override;
+    float getMinimumPower() override { return -30.0f; }  // CC1101 minimum power is -30 dBm
+    float getMaximumPower() override { return 10.0f; }   // CC1101 maximum power is 10 dBm
+    
+    // Use the default implementations from the Radio base class
+    using Radio::processSnrFeedbackAndAdjustPower;
+    using Radio::setAdaptivePowerParams;
 
 private:
-    CC1101 radio;
+    Module* radio;
+    CC1101* cc1101;
     bool isInitialized;
 };
 

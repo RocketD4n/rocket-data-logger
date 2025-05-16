@@ -26,6 +26,7 @@ void updateMainPageValues();
 void drawGraphPage();
 void updateGraph();
 void updateDisplay();
+void sendSnrFeedback();
 
 // Display layout constants
 #define HEADER_HEIGHT 30
@@ -62,6 +63,7 @@ float batteryPercent = 0.0f;
 float maxG = 0.0f;
 bool launchState = false;
 float temperature = 0.0f;
+int8_t txPower = 0;  // Transmission power in dBm
 
 // Display page control
 int currentPage = 0; // 0 = main data page, 1 = altitude graph page
@@ -76,6 +78,10 @@ int historyCount = 0;
 uint32_t totalPackets = 0;
 uint32_t badPackets = 0;
 uint32_t badChecksums = 0;
+
+// SNR feedback control
+unsigned long lastSnrFeedbackTime = 0;
+const unsigned long SNR_FEEDBACK_INTERVAL = 1000; // Send SNR feedback every 1 second
 
 void setup() {
     Serial.begin(115200);
@@ -148,9 +154,10 @@ void drawMainPage() {
     tft.drawString("Launch:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT);
     tft.drawString("Temp:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT * 2);
     tft.drawString("Max-G:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+    tft.drawString("TX Power:", RIGHT_COL, HEADER_HEIGHT + VALUE_HEIGHT * 4);
     
     // Stats row (full width)
-    tft.drawString("Stats:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 4);
+    tft.drawString("Stats:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 5);
     
     // Update values
     updateMainPageValues();
@@ -178,7 +185,7 @@ void updateMainPageValues() {
     // Update stats and signal strength (using full width)
     float snr = radio->getSNR();
     String statsStr = String(totalPackets) + " packets, " + String(badPackets) + " errors, SNR: " + String(snr, 1) + "dB   ";
-    tft.drawString(statsStr, 80, HEADER_HEIGHT + VALUE_HEIGHT * 4);
+    tft.drawString(statsStr, 80, HEADER_HEIGHT + VALUE_HEIGHT * 5);
     
     // Update battery voltage and percentage
     String batteryStr = String(batteryVoltage, 2) + "V " + String(batteryPercent) + "%   ";
@@ -193,8 +200,12 @@ void updateMainPageValues() {
     tft.drawString(tempStr, RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT * 2);
     
     // Update max G-force
-    String gStr = String(maxG, 1) + "g    ";
-    tft.drawString(gStr, RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+    String maxGStr = String(maxG, 1) + "g    ";
+    tft.drawString(maxGStr, RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+    
+    // Update TX power
+    String powerStr = String(txPower) + " dBm    ";
+    tft.drawString(powerStr, RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT * 4);
 }
 
 // Draw the altitude graph page (page 1)
@@ -314,6 +325,7 @@ void processGpsPacket(uint8_t* data) {
     gpsAltitude = packet->altitude;
     batteryVoltage = packet->batteryMillivolts / 1000.0f;
     batteryPercent = packet->batteryPercent;
+    txPower = packet->txPower;
 
     
     if (millisAtFirstPacket == 0) {
@@ -336,6 +348,7 @@ void processAltitudePacket(uint8_t* data) {
     maxG = packet->maxG;
     launchState = packet->launchState;
     temperature = packet->temperature;
+    txPower = packet->txPower;
     
     if (millisAtFirstPacket == 0) {
         millisAtFirstPacket = millis();
@@ -360,38 +373,73 @@ bool isTouchInButton(uint16_t x, uint16_t y, uint16_t btnX, uint16_t btnY, uint1
 
 // Handle touch events
 void handleTouch() {
-    if (ts.touched()) {
-        TS_Point p = ts.getPoint();
+    if (!ts.touched()) {
+        return;
+    }
+    
+    // Get touch coordinates
+    TS_Point p = ts.getPoint();
+    
+    // Convert touch coordinates to screen coordinates
+    uint16_t x = map(p.x, 0, 4095, 0, tft.width());
+    uint16_t y = map(p.y, 0, 4095, 0, tft.height());
+    
+    // Check if left navigation button was pressed
+    if (isTouchInButton(x, y, NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
+        // Go to previous page
+        currentPage--;
+        if (currentPage < 0) currentPage = 1; // Wrap around to last page
         
-        // Convert touch coordinates to screen coordinates based on rotation
-        uint16_t touchX = p.x;
-        uint16_t touchY = p.y;
-        
-        // Check if left navigation button was pressed
-        if (isTouchInButton(touchX, touchY, NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, 
-                           NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
-            // Go to previous page (with wrap-around)
-            currentPage = (currentPage + 1) % 2;
-            if (currentPage == 0) {
-                drawMainPage();
-            } else {
-                drawGraphPage();
-            }
-            delay(300); // Debounce
+        tft.fillScreen(TFT_BLACK);
+        if (currentPage == 0) {
+            drawMainPage();
+        } else {
+            drawGraphPage();
         }
+    }
+    
+    // Check if right navigation button was pressed
+    if (isTouchInButton(x, y, tft.width() - NAV_BUTTON_WIDTH - NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
+        // Go to next page
+        currentPage++;
+        if (currentPage > 1) currentPage = 0; // Wrap around to first page
         
-        // Check if right navigation button was pressed
-        else if (isTouchInButton(touchX, touchY, tft.width() - NAV_BUTTON_MARGIN - NAV_BUTTON_WIDTH, 
-                                NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
-            // Go to next page (with wrap-around)
-            currentPage = (currentPage + 1) % 2;
-            if (currentPage == 0) {
-                drawMainPage();
-            } else {
-                drawGraphPage();
-            }
-            delay(300); // Debounce
+        tft.fillScreen(TFT_BLACK);
+        if (currentPage == 0) {
+            drawMainPage();
+        } else {
+            drawGraphPage();
         }
+    }
+    
+    delay(50); // Debounce
+}
+
+// Send SNR feedback to the logger
+void sendSnrFeedback() {
+    // Only send feedback if we've received at least one packet
+    if (totalPackets == 0) {
+        return;
+    }
+    
+    // Create SNR feedback packet
+    SnrFeedbackPacket packet;
+    packet.version = PROTOCOL_VERSION;
+    packet.packetType = SNR_FEEDBACK_PACKET;
+    packet.subType = 0x01; // SNR data
+    
+    // Get current SNR from radio
+    packet.snrValue = radio->getSNR();
+    
+    // Calculate checksum
+    packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(SnrFeedbackPacket) - 1);
+    
+    // Transmit packet
+    if (radio->transmit((uint8_t*)&packet, sizeof(SnrFeedbackPacket))) {
+        Serial.print("Sent SNR feedback: ");
+        Serial.println(packet.snrValue);
+    } else {
+        Serial.println("Failed to send SNR feedback");
     }
 }
 
@@ -416,6 +464,11 @@ void loop() {
         switch (data[1]) {
             case GPS_DATA_PACKET:
                 processGpsPacket(data);
+                // Send SNR feedback after processing GPS packets
+                if (millis() - lastSnrFeedbackTime >= SNR_FEEDBACK_INTERVAL) {
+                    sendSnrFeedback();
+                    lastSnrFeedbackTime = millis();
+                }
                 break;
             case ALTITUDE_PACKET:
                 processAltitudePacket(data);

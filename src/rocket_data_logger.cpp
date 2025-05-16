@@ -22,7 +22,9 @@
 #include "cc1101_radio.h"
 
 // Radio instance using CC1101
-Radio* radio = new CC1101Radio(CC1101_CS, CC1101_GDO0, RADIOLIB_NC);
+Radio* radio = nullptr;
+
+// This functionality has been moved to the Radio class
 
 // Global variables for altitude tracking
 uint16_t maxAltitude = 0;
@@ -32,6 +34,11 @@ bool landedDetected = false;
 unsigned long landedTime = 0;
 char line[256];
 float maxG = 0.0f;
+
+// Adaptive power control parameters
+const float TARGET_SNR = 15.0f;       // Target SNR for reliable communication (dB)
+const float SNR_HYSTERESIS = 5.0f;    // SNR hysteresis to prevent frequent power changes
+const float POWER_ADJUST_STEP = 2.0f; // Power adjustment step in dBm
 
 // RGB LED pins
 #define LED_RED_PIN 0    // D3 on NodeMCU
@@ -83,7 +90,9 @@ void setup() {
   pinMode(LED_BLUE_PIN, OUTPUT);
   setLedYellow();  // Yellow during initialization
 
-  // Initialize radio
+  // Initialize radio (CC1101)
+  radio = new CC1101Radio(CC1101_CS, CC1101_GDO0, RADIOLIB_NC);
+  
   if (!radio->begin()) {
     Serial.println("Failed to initialize radio");
     while (true) { delay(10); }
@@ -95,6 +104,9 @@ void setup() {
     Serial.println("Failed to configure radio");
     while (true) { delay(10); }
   }
+  
+  // Configure adaptive power control
+  radio->setAdaptivePowerParams(TARGET_SNR, SNR_HYSTERESIS, POWER_ADJUST_STEP);
   
   Serial.println("Radio initialized");
   
@@ -206,6 +218,9 @@ void sendGpsData() {
         gps.encode(Serial.read());
     }
     
+    // Process any SNR feedback and adjust power if needed
+    radio->processSnrFeedbackAndAdjustPower(TARGET_SNR);
+    
     if (gps.location.isValid()) {
         GpsDataPacket packet;
         packet.version = PROTOCOL_VERSION;
@@ -216,6 +231,7 @@ void sendGpsData() {
         packet.altitude = (uint16_t)(gps.altitude.meters() * 10.0f);
         packet.batteryMillivolts = (uint16_t)(lipo.voltage() * 1000);
         packet.batteryPercent = (uint8_t)lipo.percent();
+        packet.txPower = (int8_t)radio->getCurrentPower();
         packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(GpsDataPacket) - 1);
         if (radio->transmit((uint8_t*)&packet, sizeof(packet)) != RADIOLIB_ERR_NONE) {
             Serial.println("Failed to send GPS data");
@@ -243,6 +259,7 @@ void sendAltitudeData() {
     packet.temperature = temp;
     packet.maxG = maxG;
     packet.launchState = launchDetected;
+    packet.txPower = (int8_t)radio->getCurrentPower();
     
     // Calculate checksum
     packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(AltitudePacket) - 1);

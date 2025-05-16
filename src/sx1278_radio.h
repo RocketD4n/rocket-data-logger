@@ -7,7 +7,7 @@
 class SX1278Radio : public Radio {
 public:
     SX1278Radio(int csPin, int resetPin, int dio0Pin, int dio1Pin = RADIOLIB_NC);
-    virtual ~SX1278Radio() = default;
+    virtual ~SX1278Radio();
     
     bool begin() override;
     bool configure(float frequency, float bandwidth, uint8_t power) override;
@@ -17,9 +17,18 @@ public:
     void sleep() override;
     void wake() override;
     float getSNR() override;  // SX1278 has native SNR support
+    bool setOutputPower(float power) override;
+    float getCurrentPower() override;
+    float getMinimumPower() override { return 2.0f; }  // SX1278 minimum power is 2 dBm
+    float getMaximumPower() override { return 20.0f; } // SX1278 maximum power is 20 dBm
+    
+    // Use the default implementations from the Radio base class
+    using Radio::processSnrFeedbackAndAdjustPower;
+    using Radio::setAdaptivePowerParams;
 
 private:
-    SX1278 radio;
+    Module* radio;
+    SX1278* lora;
     bool isInitialized;
 };
 
