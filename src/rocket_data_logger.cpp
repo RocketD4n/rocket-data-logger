@@ -148,13 +148,15 @@ void setup() {
       sensors_event_t event;
       bmp.getEvent(&event);
       
-      // Calculate sea level pressure using GPS altitude
       float currentPressure = event.pressure;
       float currentTemperature;
       bmp.getTemperature(&currentTemperature);
       
-      // Calculate sea level pressure using the current altitude and temperature
-      seaLevelPressure = bmp.pressureToAltitude(currentPressure, currentPressure, currentTemperature);
+      // Calculate sea level pressure using the GPS altitude
+      // P0 = P * exp(altitude / (29.3 * (T + 273.15)))
+      float gpsAltitudeMeters = gps.altitude.meters();
+      seaLevelPressure = currentPressure / pow(1.0 - (gpsAltitudeMeters / 44330.0), 5.255);
+      
       Serial.print("Sea level pressure initialized: ");
       Serial.println(seaLevelPressure);
       Serial.print("Temperature: ");
@@ -252,9 +254,18 @@ void sendAltitudeData() {
 }
 
 void loop() {
-        // Get current battery percentage
+        // Get current battery percentage with hysteresis to prevent rapid mode switching
+    static bool lowBatteryMode = false;
     uint8_t batteryPercent = (uint8_t)lipo.percent();
-    bool lowBatteryMode = batteryPercent < 50;
+    
+    // Add hysteresis: enter low power mode at 45%, exit at 55%
+    if (lowBatteryMode && batteryPercent >= 55) {
+        lowBatteryMode = false;
+        Serial.println("Exiting low battery mode");
+    } else if (!lowBatteryMode && batteryPercent <= 45) {
+        lowBatteryMode = true;
+        Serial.println("Entering low battery mode");
+    }
     
     // Send GPS data (every 10 seconds in low battery mode, every second in normal mode)
     static unsigned long lastGpsSend = 0;
@@ -267,11 +278,15 @@ void loop() {
             delay(10); // Small delay to ensure radio is ready
         }
         
-        sendGpsData();
+        // Store current time before sending to ensure accurate timing
         lastGpsSend = millis();
         
-        // Put radio to sleep in low battery mode
+        // Send GPS data
+        sendGpsData();
+        
+        // Put radio to sleep in low battery mode, with a small delay to ensure transmission is complete
         if (lowBatteryMode) {
+            delay(50); // Allow time for the transmission to complete
             radio->sleep();
         }
     }
@@ -292,43 +307,13 @@ void loop() {
     sensors_event_t a, g;
     sensors_event_t temp;
     mpu.getEvent(&a, &g, &temp);
-    
-    // Log data to SD card
-    if (Textfile) {
-        Textfile.print(micros());
-        Textfile.print(",");
-        Textfile.print(a.acceleration.x);
-        Textfile.print(",");
-        Textfile.print(a.acceleration.y);
-        Textfile.print(",");
-        Textfile.print(a.acceleration.z);
-        Textfile.print(",");
-        Textfile.print(g.gyro.x);
-        Textfile.print(",");
-        Textfile.print(g.gyro.y);
-        Textfile.print(",");
-        Textfile.print(g.gyro.z);
-        
-        float altitude, temp;
-        getAltitudeAndTemp(altitude, temp);
-        Textfile.print(",");
-        Textfile.print(altitude);
-        Textfile.print(",");
-        Textfile.println(temp);
-        
-        if (millis() - lastFlush >= 1000) {
-            Textfile.flush();
-            lastFlush = millis();
-        }
-    }
-    
+
+    float altitude, temperature;
+    getAltitudeAndTemp(altitude, temperature);
+
     // Check for launch and handle deployment    
     if (launchDetected) {
-        float currentAltitude;
-        float currentTemp;
-        getAltitudeAndTemp(currentAltitude, currentTemp);
-        
-        if (!relayActive && currentAltitude < lastAltitude - ALTITUDE_DROP_THRESHOLD) {
+        if (!relayActive && altitude < lastAltitude - ALTITUDE_DROP_THRESHOLD) {
             relayActive = true;
             digitalWrite(PRIMARY_RELAY_PIN, HIGH);
             primaryRelayActivationTime = micros();
@@ -340,7 +325,7 @@ void loop() {
             Serial.println("Backup relay activated");
         }
         
-        lastAltitude = currentAltitude;
+        lastAltitude = altitude;
     }
     
     // Compute total acceleration magnitude
@@ -354,8 +339,7 @@ void loop() {
       setLedBlue();  // Blue indicates launch detected
     }
     
-    float altitude, temperature;
-    getAltitudeAndTemp(altitude, temperature);
+   
 
     // Check altitude drop
     if (lastAltitude > 0.0f) {
@@ -380,8 +364,7 @@ void loop() {
   
   lastAltitude = altitude;
 
-  while (gpsSerial.available() > 0) 
-    gps.encode(gpsSerial.read());
+  // GPS data is already read at the beginning of the loop
   
  // gps.location.lat(), gps.location.lng(), gps.speed.kmph(), gps.altitude.meters()
 //  gps.date.year(), month(), day(), hour(), minute(), second(), 
