@@ -38,6 +38,7 @@ The main page shows real-time telemetry data in an easy-to-read format:
 | Max Alt:  456.7m               Launch:  Waiting...    |
 | GPS:      12.34567,-12.34567   Temp:    25.1C        |
 | Staleness: 5s                  Max-G:   3.2g         |
+|                                TX Power: 10 dBm      |
 | Stats: 123 packets, 12 errors, SNR: 15.1dB           |
 |                                                       |
 +------------------------------------------------------+
@@ -138,6 +139,7 @@ struct GpsDataPacket {
     uint16_t altitude;      // Meters
     uint16_t batteryMillivolts; // Battery voltage in millivolts
     uint8_t batteryPercent; // Battery percentage
+    int8_t txPower;         // Current transmission power in dBm
     uint8_t checksum;       // Packet checksum
 };
 ```
@@ -153,6 +155,18 @@ struct AltitudePacket {
     uint16_t temperature;   // Temperature reading
     uint16_t maxG;          // Maximum G-force experienced
     uint8_t launchState;    // Current launch state
+    int8_t txPower;         // Current transmission power in dBm
+    uint8_t checksum;       // Packet checksum
+};
+```
+
+#### SNR Feedback Packet (0xFF)
+```c
+struct SnrFeedbackPacket {
+    uint8_t version;        // Protocol version
+    uint8_t packetType;     // 0xFF for SNR feedback
+    uint8_t subType;        // 0x01 for SNR data
+    float snrValue;         // Current SNR value measured by receiver
     uint8_t checksum;       // Packet checksum
 };
 ```
@@ -164,6 +178,7 @@ struct AltitudePacket {
 - Timestamps for data synchronization
 - Separate packet types for different data
 - CRC enabled for additional error detection
+- Adaptive power management using SNR feedback
 
 ## Data Transmission
 
@@ -197,6 +212,33 @@ struct AltitudePacket {
 4. Wireless Transmission
    - 433MHz radio
    - Error detection
+   - Adaptive power management
+
+## Adaptive Power Management
+
+The system features an adaptive power management system that dynamically adjusts the transmission power based on signal quality feedback:
+
+1. **SNR Feedback Mechanism**
+   - Receiver measures Signal-to-Noise Ratio (SNR) of incoming packets
+   - SNR feedback is sent back to the transmitter every 5 seconds
+   - Transmitter adjusts power based on received SNR feedback
+
+2. **Power Adjustment Algorithm**
+   - Target SNR: 15 dB (configurable)
+   - Hysteresis: 5 dB (prevents rapid power changes)
+   - If SNR > (target + hysteresis), power is reduced to save battery
+   - If SNR < (target - hysteresis), power is increased for better reliability
+   - Power adjustments occur at most every 10 seconds
+
+3. **Radio-Specific Power Ranges**
+   - SX1278 (LoRa): 2 dBm to 20 dBm
+   - CC1101: -30 dBm to 10 dBm
+
+4. **Benefits**
+   - Extended battery life through optimized power usage
+   - Maintains reliable communication at maximum possible distance
+   - Reduces interference with other systems
+   - Real-time power level displayed on receiver
    - Timestamped data
 
 5. Deployment System
