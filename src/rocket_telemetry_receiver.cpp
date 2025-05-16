@@ -66,13 +66,22 @@ float temperature = 0.0f;
 int8_t txPower = 0;  // Transmission power in dBm
 
 // Display page control
-int currentPage = 0; // 0 = main data page, 1 = altitude graph page
+int currentPage = 0; // 0 = main data page, 1-3 = graph pages
+const int NUM_PAGES = 4; // Main page + 3 graph pages
 
-// Altitude history for graph
-float altitudeHistory[MAX_DATA_POINTS];
+// Graph data history
+float dataHistory[3][MAX_DATA_POINTS]; // 0=altitude, 1=speed, 2=txPower
 unsigned long timeHistory[MAX_DATA_POINTS];
 int historyIndex = 0;
 int historyCount = 0;
+
+// Graph configuration
+const char* graphTitles[] = {"Altitude vs Time", "Speed vs Time", "TX Power vs Time"};
+const char* graphYLabels[] = {"Altitude (m)", "Speed (m/s)", "Power (dBm)"};
+const uint16_t graphColors[] = {TFT_GREEN, TFT_CYAN, TFT_YELLOW};
+float lastAltitude = 0.0f;
+unsigned long lastAltitudeTime = 0;
+float currentSpeed = 0.0f;
 
 // Packet statistics
 uint32_t totalPackets = 0;
@@ -208,14 +217,17 @@ void updateMainPageValues() {
     tft.drawString(powerStr, RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT * 4);
 }
 
-// Draw the altitude graph page (page 1)
+// Draw a graph page (pages 1-3)
 void drawGraphPage() {
     tft.fillScreen(TFT_BLACK);
     drawNavigationButtons();
     
+    // Get the graph index (0-2) from the current page (1-3)
+    int graphIndex = currentPage - 1;
+    
     // Draw page title
     tft.setTextColor(LABEL_COLOR, TFT_BLACK);
-    tft.drawString("Altitude vs Time", 100, 10);
+    tft.drawString(graphTitles[graphIndex], 100, 10);
     
     // Draw graph axes
     tft.drawLine(GRAPH_X, GRAPH_Y, GRAPH_X, GRAPH_Y + GRAPH_HEIGHT, AXIS_COLOR); // Y-axis
@@ -227,24 +239,44 @@ void drawGraphPage() {
     
     // Rotate text for Y-axis label
     tft.setRotation(2); // Temporarily rotate to draw vertical text
-    tft.drawString("Altitude (m)", tft.height() - (GRAPH_Y + GRAPH_HEIGHT/2 + 30), tft.width() - GRAPH_X + 10);
+    tft.drawString(graphYLabels[graphIndex], tft.height() - (GRAPH_Y + GRAPH_HEIGHT/2 + 30), tft.width() - GRAPH_X + 10);
     tft.setRotation(3); // Restore rotation
     
-    // Draw Y-axis scale
-    if (maxAltitude > 0) {
+    // Draw Y-axis scale based on graph type
+    float maxValue = 0;
+    switch (graphIndex) {
+        case 0: // Altitude
+            maxValue = maxAltitude;
+            break;
+        case 1: // Speed
+            maxValue = 30.0f; // Reasonable max speed in m/s
+            for (int i = 0; i < historyCount; i++) {
+                int idx = (historyIndex - historyCount + i + MAX_DATA_POINTS) % MAX_DATA_POINTS;
+                if (dataHistory[1][idx] > maxValue) maxValue = dataHistory[1][idx];
+            }
+            break;
+        case 2: // TX Power
+            maxValue = 20.0f; // Max TX power in dBm
+            break;
+    }
+    
+    if (maxValue > 0) {
         tft.setTextColor(AXIS_COLOR, TFT_BLACK);
         tft.drawString("0", GRAPH_X - 20, GRAPH_Y + GRAPH_HEIGHT - 5);
-        tft.drawString(String(maxAltitude, 0), GRAPH_X - 25, GRAPH_Y - 5);
-        tft.drawString(String(maxAltitude/2, 0), GRAPH_X - 25, GRAPH_Y + GRAPH_HEIGHT/2 - 5);
+        tft.drawString(String(maxValue, 0), GRAPH_X - 25, GRAPH_Y - 5);
+        tft.drawString(String(maxValue/2, 0), GRAPH_X - 25, GRAPH_Y + GRAPH_HEIGHT/2 - 5);
     }
     
     // Update the graph with current data
     updateGraph();
 }
 
-// Update the altitude graph
+// Update the current graph
 void updateGraph() {
-    if (currentPage != 1 || historyCount == 0) return;
+    if (currentPage < 1 || currentPage > 3 || historyCount == 0) return;
+    
+    // Get the graph index (0-2) from the current page (1-3)
+    int graphIndex = currentPage - 1;
     
     // Clear graph area (not the axes)
     tft.fillRect(GRAPH_X + 1, GRAPH_Y, GRAPH_WIDTH - 1, GRAPH_HEIGHT, TFT_BLACK);
@@ -265,20 +297,38 @@ void updateGraph() {
         tft.drawString(String(maxTime/1000), GRAPH_X + GRAPH_WIDTH - 15, GRAPH_Y + GRAPH_HEIGHT + 5);
     }
     
+    // Get max value for Y-axis scaling
+    float maxValue = 0;
+    switch (graphIndex) {
+        case 0: // Altitude
+            maxValue = maxAltitude;
+            break;
+        case 1: // Speed
+            maxValue = 30.0f; // Reasonable max speed in m/s
+            for (int i = 0; i < historyCount; i++) {
+                int idx = (historyIndex - historyCount + i + MAX_DATA_POINTS) % MAX_DATA_POINTS;
+                if (dataHistory[1][idx] > maxValue) maxValue = dataHistory[1][idx];
+            }
+            break;
+        case 2: // TX Power
+            maxValue = 20.0f; // Max TX power in dBm
+            break;
+    }
+    
     // Plot the data points
-    if (historyCount > 1 && maxAltitude > 0 && maxTime > 0) {
+    if (historyCount > 1 && maxValue > 0 && maxTime > 0) {
         for (int i = 1; i < historyCount; i++) {
             int idx1 = (historyIndex - historyCount + i - 1 + MAX_DATA_POINTS) % MAX_DATA_POINTS;
             int idx2 = (historyIndex - historyCount + i + MAX_DATA_POINTS) % MAX_DATA_POINTS;
             
             // Scale data points to graph dimensions
             int x1 = GRAPH_X + (timeHistory[idx1] * GRAPH_WIDTH) / maxTime;
-            int y1 = GRAPH_Y + GRAPH_HEIGHT - (altitudeHistory[idx1] * GRAPH_HEIGHT) / maxAltitude;
+            int y1 = GRAPH_Y + GRAPH_HEIGHT - (dataHistory[graphIndex][idx1] * GRAPH_HEIGHT) / maxValue;
             int x2 = GRAPH_X + (timeHistory[idx2] * GRAPH_WIDTH) / maxTime;
-            int y2 = GRAPH_Y + GRAPH_HEIGHT - (altitudeHistory[idx2] * GRAPH_HEIGHT) / maxAltitude;
+            int y2 = GRAPH_Y + GRAPH_HEIGHT - (dataHistory[graphIndex][idx2] * GRAPH_HEIGHT) / maxValue;
             
             // Draw line between points
-            tft.drawLine(x1, y1, x2, y2, GRAPH_COLOR);
+            tft.drawLine(x1, y1, x2, y2, graphColors[graphIndex]);
         }
     }
 }
@@ -287,7 +337,7 @@ void updateGraph() {
 void updateDisplay() {
     if (currentPage == 0) {
         updateMainPageValues();
-    } else if (currentPage == 1) {
+    } else if (currentPage >= 1 && currentPage <= 3) {
         updateGraph();
     }
 }
@@ -355,13 +405,27 @@ void processAltitudePacket(uint8_t* data) {
     }  
     lastPacketTime = packet->timestamp;
     
-    // Store altitude data for graph
-    altitudeHistory[historyIndex] = currentAltitude;
+    // Calculate speed from altitude changes
+    unsigned long currentTime = millis();
+    if (lastAltitudeTime > 0) {
+        // Calculate speed in m/s based on altitude change
+        float timeDelta = (currentTime - lastAltitudeTime) / 1000.0f; // seconds
+        if (timeDelta > 0) {
+            currentSpeed = (currentAltitude - lastAltitude) / timeDelta;
+            // Apply simple low-pass filter to smooth speed data
+            currentSpeed = 0.7f * currentSpeed + 0.3f * dataHistory[1][historyIndex > 0 ? historyIndex - 1 : MAX_DATA_POINTS - 1];
+        }
+    }
+    lastAltitude = currentAltitude;
+    lastAltitudeTime = currentTime;
+    
+    // Store data for graphs
+    dataHistory[0][historyIndex] = currentAltitude; // Altitude
+    dataHistory[1][historyIndex] = currentSpeed;    // Speed
+    dataHistory[2][historyIndex] = txPower;         // TX Power
     timeHistory[historyIndex] = millis() - millisAtFirstPacket;
     historyIndex = (historyIndex + 1) % MAX_DATA_POINTS;
-    if (historyCount < MAX_DATA_POINTS) {
-        historyCount++;
-    }
+    historyCount = min(historyCount + 1, MAX_DATA_POINTS);
     
     updateDisplay();
 }
@@ -388,7 +452,7 @@ void handleTouch() {
     if (isTouchInButton(x, y, NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
         // Go to previous page
         currentPage--;
-        if (currentPage < 0) currentPage = 1; // Wrap around to last page
+        if (currentPage < 0) currentPage = NUM_PAGES - 1; // Wrap around to last page
         
         tft.fillScreen(TFT_BLACK);
         if (currentPage == 0) {
@@ -402,7 +466,7 @@ void handleTouch() {
     if (isTouchInButton(x, y, tft.width() - NAV_BUTTON_WIDTH - NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
         // Go to next page
         currentPage++;
-        if (currentPage > 1) currentPage = 0; // Wrap around to first page
+        if (currentPage >= NUM_PAGES) currentPage = 0; // Wrap around to first page
         
         tft.fillScreen(TFT_BLACK);
         if (currentPage == 0) {

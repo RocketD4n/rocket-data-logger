@@ -64,6 +64,46 @@ The second page displays a real-time graph of altitude versus time, allowing use
 +------------------------------------------------------+
 ```
 
+### Page 3: Speed Graph
+
+The third page shows a real-time graph of vertical speed versus time, calculated from altitude changes:
+
+```
++------------------------------------------------------+
+| <           Speed vs Time                          > |
+|                                                       |
+|    ^                                                  |
+|    |                                                  |
+| S  |               /\                                 |
+| p  |              /  \                                |
+| e  |             /    \                               |
+| e  |            /      \                              |
+| d  |___________/        \___                          |
+|    +---------------------------------------->         |
+|                      Time (s)                         |
++------------------------------------------------------+
+```
+
+### Page 4: TX Power Graph
+
+The fourth page displays the transmission power over time, showing how the adaptive power management system adjusts power levels:
+
+```
++------------------------------------------------------+
+| <           TX Power vs Time                       > |
+|                                                       |
+|    ^                                                  |
+|    |                                                  |
+| P  |                                                  |
+| o  |    _______________                               |
+| w  |   /                \___                          |
+| e  |  /                     \___                      |
+| r  | /                          \___                  |
+|    +---------------------------------------->         |
+|                      Time (s)                         |
++------------------------------------------------------+
+```
+
 ## Pin Configuration
 
 ### Data Logger (NodeMCU) Pins
