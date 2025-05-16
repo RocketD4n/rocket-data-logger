@@ -140,7 +140,7 @@ The fifth page allows the user to select which transmitter to monitor when multi
 The telemetry system uses a custom protocol with three distinct packet types to optimize data transmission:
 
 ### GPS Data Packet (Type 0x01)
-```
+```c
 struct GpsDataPacket {
     uint8_t version;        // Protocol version (0x01)
     uint8_t packetType;     // 0x01 for GPS data
@@ -153,7 +153,7 @@ struct GpsDataPacket {
 ```
 
 ### Altitude Packet (Type 0x02)
-```
+```c
 struct AltitudePacket {
     uint8_t version;        // Protocol version (0x01)
     uint8_t packetType;     // 0x02 for altitude data
@@ -168,7 +168,7 @@ struct AltitudePacket {
 ```
 
 ### System Data Packet (Type 0x03)
-```
+```c
 struct SystemDataPacket {
     uint8_t version;        // Protocol version (0x01)
     uint8_t packetType;     // 0x03 for system data
@@ -182,7 +182,7 @@ struct SystemDataPacket {
 ```
 
 ### SNR Feedback Packet (Type 0xFF)
-```
+```c
 struct SnrFeedbackPacket {
     uint8_t version;        // Protocol version (0x01)
     uint8_t packetType;     // 0xFF for feedback packets
@@ -253,52 +253,13 @@ Important notes for SX1278 maximum power operation:
    - Data Rate: ~0.5-1 kbps effective throughput
    - Latency: ~100-200ms per transmission
 
-## Communication Protocol
+## Additional Information
 
-### Packet Structure
+### Performance Expectations
 
-#### GPS Data Packet (0x01)
-```c
-struct GpsDataPacket {
-    uint8_t version;        // Protocol version
-    uint8_t packetType;     // 0x01 for GPS data
-    uint32_t timestamp;     // Milliseconds since startup
-    uint32_t latitude;      // Fixed point (x10,000,000)
-    uint32_t longitude;     // Fixed point (x10,000,000)
-    uint16_t altitude;      // Meters
-    uint16_t batteryMillivolts; // Battery voltage in millivolts
-    uint8_t batteryPercent; // Battery percentage
-    int8_t txPower;         // Current transmission power in dBm
-    uint8_t checksum;       // Packet checksum
-};
-```
-
-#### Altitude Packet (0x02)
-```c
-struct AltitudePacket {
-    uint8_t version;        // Protocol version
-    uint8_t packetType;     // 0x02 for altitude data
-    uint32_t timestamp;     // Milliseconds since startup
-    uint16_t currentAltitude; // Current altitude in meters
-    uint16_t maxAltitude;   // Maximum recorded altitude
-    uint16_t temperature;   // Temperature reading
-    uint16_t maxG;          // Maximum G-force experienced
-    uint8_t launchState;    // Current launch state
-    int8_t txPower;         // Current transmission power in dBm
-    uint8_t checksum;       // Packet checksum
-};
-```
-
-#### SNR Feedback Packet (0xFF)
-```c
-struct SnrFeedbackPacket {
-    uint8_t version;        // Protocol version
-    uint8_t packetType;     // 0xFF for SNR feedback
-    uint8_t subType;        // 0x01 for SNR data
-    float snrValue;         // Current SNR value measured by receiver
-    uint8_t checksum;       // Packet checksum
-};
-```
+- Range: 2-5km+ with line of sight
+- Data Rate: ~0.5-1 kbps effective throughput
+- Latency: ~100-200ms per transmission
 
 ### Protocol Features
 - Fixed packet size (64 bytes)

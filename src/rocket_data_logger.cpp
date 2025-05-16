@@ -2,7 +2,7 @@
  *  TODO:
  *  - receiver to send to rocket command to make sound
  *  - receiver to offer binding options
- *  - receiver to send to rocket parameters/constants
+ *  - receiver to show battery level of itself
  */
  
 #include <Arduino.h>
