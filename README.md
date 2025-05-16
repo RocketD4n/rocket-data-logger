@@ -136,6 +136,8 @@ struct GpsDataPacket {
     uint32_t latitude;      // Fixed point (x10,000,000)
     uint32_t longitude;     // Fixed point (x10,000,000)
     uint16_t altitude;      // Meters
+    uint16_t batteryMillivolts; // Battery voltage in millivolts
+    uint8_t batteryPercent; // Battery percentage
     uint8_t checksum;       // Packet checksum
 };
 ```
@@ -148,6 +150,9 @@ struct AltitudePacket {
     uint32_t timestamp;     // Milliseconds since startup
     uint16_t currentAltitude; // Current altitude in meters
     uint16_t maxAltitude;   // Maximum recorded altitude
+    uint16_t temperature;   // Temperature reading
+    uint16_t maxG;          // Maximum G-force experienced
+    uint8_t launchState;    // Current launch state
     uint8_t checksum;       // Packet checksum
 };
 ```
