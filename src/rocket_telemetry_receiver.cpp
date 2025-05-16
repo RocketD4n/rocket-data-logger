@@ -50,38 +50,50 @@ void sendSnrFeedback();
 #define AXIS_COLOR TFT_WHITE
 #define MAX_DATA_POINTS 100
 
-// Global variables for tracking data
 float currentAltitude = 0.0f;
 float maxAltitude = 0.0f;
-float latitude = 0.0f;
-float longitude = 0.0f;
-float gpsAltitude = 0.0f;
-unsigned long lastPacketTime = 0;
-unsigned long millisAtFirstPacket = 0;
+float currentLat = 0.0f;
+float currentLng = 0.0f;
 float batteryVoltage = 0.0f;
-float batteryPercent = 0.0f;
-float maxG = 0.0f;
-bool launchState = false;
+uint8_t batteryPercent = 0;
 float temperature = 0.0f;
-int8_t txPower = 0;  // Transmission power in dBm
+float maxG = 0.0f;
+int8_t txPower = 0;
+uint8_t launchState = 0;
+uint32_t rocketUptime = 0; // Rocket uptime in milliseconds
+
+unsigned long lastPacketTime = 0;
+unsigned long packetCount = 0;
+unsigned long errorCount = 0;
+float lastSnr = 0.0f;
+
+// Transmitter selection
+#define MAX_TRANSMITTERS 10
+uint32_t knownTransmitters[MAX_TRANSMITTERS] = {0};
+int numTransmitters = 0;
+int selectedTransmitterIndex = -1; // -1 means no transmitter selected
+uint32_t selectedTransmitterId = 0;
 
 // Display page control
-int currentPage = 0; // 0 = main data page, 1-3 = graph pages
-const int NUM_PAGES = 4; // Main page + 3 graph pages
+int currentPage = 0; // 0 = main data page, 1-3 = graph pages, 4 = transmitter selection page
+const int NUM_PAGES = 5; // Main page + 3 graph pages + transmitter selection page
 
 // Graph data history
 float dataHistory[3][MAX_DATA_POINTS]; // 0=altitude, 1=speed, 2=txPower
 unsigned long timeHistory[MAX_DATA_POINTS];
 int historyIndex = 0;
 int historyCount = 0;
+unsigned long millisAtFirstPacket = 0; // Timestamp when first packet was received
+
+// Speed calculation variables
+float currentSpeed = 0.0f;
+float lastAltitude = 0.0f;
+unsigned long lastAltitudeTime = 0;
 
 // Graph configuration
 const char* graphTitles[] = {"Altitude vs Time", "Speed vs Time", "TX Power vs Time"};
 const char* graphYLabels[] = {"Altitude (m)", "Speed (m/s)", "Power (dBm)"};
 const uint16_t graphColors[] = {TFT_GREEN, TFT_CYAN, TFT_YELLOW};
-float lastAltitude = 0.0f;
-unsigned long lastAltitudeTime = 0;
-float currentSpeed = 0.0f;
 
 // Packet statistics
 uint32_t totalPackets = 0;
@@ -183,38 +195,44 @@ void updateMainPageValues() {
     tft.drawString(String(maxAltitude, 1) + "m    ", 180, HEADER_HEIGHT + VALUE_HEIGHT);
     
     // Update GPS coordinates (more compact format)
-    String gpsStr = String(latitude, 5) + "," + String(longitude, 5);
+    String gpsStr = String(currentLat, 5) + "," + String(currentLng, 5);
     tft.drawString(gpsStr + "  ", 180, HEADER_HEIGHT + VALUE_HEIGHT * 2);
     
     // Update staleness
-    unsigned long timeSinceLastPacket = (millis() - millisAtFirstPacket - lastPacketTime) / 1000;
-    String timeStr = String(timeSinceLastPacket) + "s    ";
-    tft.drawString(timeStr, 180, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+    unsigned long staleness = (millis() - lastPacketTime) / 1000;
+    String stalenessStr = String(staleness) + "s";
+    tft.drawString(stalenessStr + "  ", 180, HEADER_HEIGHT + VALUE_HEIGHT * 3);
     
-    // Update stats and signal strength (using full width)
-    float snr = radio->getSNR();
-    String statsStr = String(totalPackets) + " packets, " + String(badPackets) + " errors, SNR: " + String(snr, 1) + "dB   ";
-    tft.drawString(statsStr, 80, HEADER_HEIGHT + VALUE_HEIGHT * 5);
-    
-    // Update battery voltage and percentage
-    String batteryStr = String(batteryVoltage, 2) + "V " + String(batteryPercent) + "%   ";
-    tft.drawString(batteryStr, RIGHT_COL + 60, HEADER_HEIGHT);
+    // Update battery
+    String batteryStr = String(batteryVoltage, 2) + "V " + String(batteryPercent) + "%";
+    tft.drawString(batteryStr + "  ", RIGHT_COL + 60, HEADER_HEIGHT);
     
     // Update launch state
-    String launchStr = launchState ? "Launched    " : "Waiting...    ";
-    tft.drawString(launchStr, RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT);
+    String launchStateStr;
+    switch (launchState) {
+        case 0: launchStateStr = "Waiting..."; break;
+        case 1: launchStateStr = "Launched"; break;
+        case 2: launchStateStr = "Apogee"; break;
+        case 3: launchStateStr = "Landed"; break;
+        default: launchStateStr = "Unknown"; break;
+    }
+    tft.drawString(launchStateStr + "  ", RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT);
     
     // Update temperature
-    String tempStr = String(temperature, 1) + "C    ";
-    tft.drawString(tempStr, RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT * 2);
+    String tempStr = String(temperature, 1) + "C";
+    tft.drawString(tempStr + "  ", RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT * 2);
     
-    // Update max G-force
-    String maxGStr = String(maxG, 1) + "g    ";
-    tft.drawString(maxGStr, RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT * 3);
+    // Update max G
+    String maxGStr = String(maxG, 1) + "g";
+    tft.drawString(maxGStr + "  ", RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT * 3);
     
     // Update TX power
-    String powerStr = String(txPower) + " dBm    ";
+    String powerStr = String(txPower) + " dBm";
     tft.drawString(powerStr, RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT * 4);
+    
+    // Update packet stats
+    String statsStr = String(packetCount) + " pkts, " + String(errorCount) + " errs, SNR: " + String(lastSnr, 1) + "dB";
+    tft.drawString(statsStr + "  ", 10, HEADER_HEIGHT + VALUE_HEIGHT * 5);
 }
 
 // Draw a graph page (pages 1-3)
@@ -339,95 +357,41 @@ void updateDisplay() {
         updateMainPageValues();
     } else if (currentPage >= 1 && currentPage <= 3) {
         updateGraph();
-    }
-}
-    
-
-
-bool verifyPacket(uint8_t* data, size_t length) {
-    if (length < 2) { // Minimum packet size (version + type)
-        badPackets++;
-        return false;
-    }
-    
-    // Verify checksum
-    uint8_t expectedChecksum = calculateChecksum(data, length);
-    uint8_t receivedChecksum = data[length - 1];
-    if (expectedChecksum != receivedChecksum) {
-        badChecksums++;
-        Serial.printf("Checksum mismatch: expected 0x%02X, got 0x%02X\n", expectedChecksum, receivedChecksum);
-        return false;
-    }
-    
-    return true;
-}
-
-void processGpsPacket(uint8_t* data) {
-    if (!verifyPacket(data, sizeof(GpsDataPacket))) {
-        return;
-    }
-    
-    GpsDataPacket* packet = (GpsDataPacket*)data;
-    
-    // Convert fixed-point coordinates back to floating point
-    latitude = packet->latitude / 1000000.0f;
-    longitude = packet->longitude / 1000000.0f;
-    gpsAltitude = packet->altitude;
-    batteryVoltage = packet->batteryMillivolts / 1000.0f;
-    batteryPercent = packet->batteryPercent;
-    txPower = packet->txPower;
-
-    
-    if (millisAtFirstPacket == 0) {
-        millisAtFirstPacket = millis();
-    }   
-    lastPacketTime = packet->timestamp;
-    
-    updateDisplay();
-}
-
-void processAltitudePacket(uint8_t* data) {
-    if (!verifyPacket(data, sizeof(AltitudePacket))) {
-        return;
-    }
-    
-    AltitudePacket* packet = (AltitudePacket*)data;
-    
-    currentAltitude = packet->currentAltitude;
-    maxAltitude = packet->maxAltitude;
-    maxG = packet->maxG;
-    launchState = packet->launchState;
-    temperature = packet->temperature;
-    txPower = packet->txPower;
-    
-    if (millisAtFirstPacket == 0) {
-        millisAtFirstPacket = millis();
-    }  
-    lastPacketTime = packet->timestamp;
-    
-    // Calculate speed from altitude changes
-    unsigned long currentTime = millis();
-    if (lastAltitudeTime > 0) {
-        // Calculate speed in m/s based on altitude change
-        float timeDelta = (currentTime - lastAltitudeTime) / 1000.0f; // seconds
-        if (timeDelta > 0) {
-            currentSpeed = (currentAltitude - lastAltitude) / timeDelta;
-            // Apply simple low-pass filter to smooth speed data
-            currentSpeed = 0.7f * currentSpeed + 0.3f * dataHistory[1][historyIndex > 0 ? historyIndex - 1 : MAX_DATA_POINTS - 1];
+    } else if (currentPage == 4) {
+        // Draw transmitter selection page
+        tft.fillScreen(TFT_BLACK);
+        tft.setTextColor(LABEL_COLOR, TFT_BLACK);
+        tft.drawString("Select Transmitter:", 10, 10);
+        
+        // Draw list of known transmitters with uptime
+        for (int i = 0; i < numTransmitters; i++) {
+            String idStr = "ID: 0x" + String(knownTransmitters[i], HEX);
+            tft.drawString(idStr, 10, 40 + i * 30);
+            
+            // If this is the selected transmitter, show uptime
+            if (knownTransmitters[i] == selectedTransmitterId) {
+                // Format uptime nicely (hours:minutes:seconds)
+                unsigned long uptimeSec = rocketUptime / 1000;
+                unsigned long hours = uptimeSec / 3600;
+                unsigned long minutes = (uptimeSec % 3600) / 60;
+                unsigned long seconds = uptimeSec % 60;
+                
+                String uptimeStr = "Uptime: " + String(hours) + ":" + 
+                                  (minutes < 10 ? "0" : "") + String(minutes) + ":" + 
+                                  (seconds < 10 ? "0" : "") + String(seconds);
+                                  
+                tft.drawString(uptimeStr, 160, 40 + i * 30);
+            }
+        }
+        
+        // Highlight selected transmitter
+        if (selectedTransmitterIndex != -1) {
+            tft.setTextColor(VALUE_COLOR, TFT_BLACK);
+            tft.drawString("ID: 0x" + String(knownTransmitters[selectedTransmitterIndex], HEX), 
+                          10, 40 + selectedTransmitterIndex * 30);
+            tft.drawRect(5, 35 + selectedTransmitterIndex * 30, 310, 25, VALUE_COLOR);
         }
     }
-    lastAltitude = currentAltitude;
-    lastAltitudeTime = currentTime;
-    
-    // Store data for graphs
-    dataHistory[0][historyIndex] = currentAltitude; // Altitude
-    dataHistory[1][historyIndex] = currentSpeed;    // Speed
-    dataHistory[2][historyIndex] = txPower;         // TX Power
-    timeHistory[historyIndex] = millis() - millisAtFirstPacket;
-    historyIndex = (historyIndex + 1) % MAX_DATA_POINTS;
-    historyCount = min(historyCount + 1, MAX_DATA_POINTS);
-    
-    updateDisplay();
 }
 
 // Check if touch is within button area
@@ -457,8 +421,10 @@ void handleTouch() {
         tft.fillScreen(TFT_BLACK);
         if (currentPage == 0) {
             drawMainPage();
-        } else {
+        } else if (currentPage >= 1 && currentPage <= 3) {
             drawGraphPage();
+        } else if (currentPage == 4) {
+            updateDisplay();
         }
     }
     
@@ -471,40 +437,200 @@ void handleTouch() {
         tft.fillScreen(TFT_BLACK);
         if (currentPage == 0) {
             drawMainPage();
-        } else {
+        } else if (currentPage >= 1 && currentPage <= 3) {
             drawGraphPage();
+        } else if (currentPage == 4) {
+            updateDisplay();
+        }
+    }
+    
+    // Check if transmitter selection page is active
+    if (currentPage == 4) {
+        // Check if a transmitter was selected
+        for (int i = 0; i < numTransmitters; i++) {
+            if (isTouchInButton(x, y, 5, 35 + i * 30, 310, 25)) {
+                selectedTransmitterIndex = i;
+                selectedTransmitterId = knownTransmitters[i];
+                updateDisplay();
+                break;
+            }
         }
     }
     
     delay(50); // Debounce
 }
 
+// Process GPS packet
+void processGpsPacket(uint8_t* buffer, size_t length) {
+  if (length < sizeof(GpsDataPacket)) {
+    Serial.println("GPS packet too small");
+    errorCount++;
+    return;
+  }
+  
+  GpsDataPacket* packet = (GpsDataPacket*)buffer;
+  
+  // Verify checksum
+  uint8_t calculatedChecksum = calculateChecksum(buffer, length - 1);
+  if (calculatedChecksum != packet->checksum) {
+    Serial.println("GPS packet checksum mismatch");
+    errorCount++;
+    return;
+  }
+  
+  // Check if this is a new transmitter
+  bool transmitterKnown = false;
+  for (int i = 0; i < numTransmitters; i++) {
+    if (knownTransmitters[i] == packet->transmitterId) {
+      transmitterKnown = true;
+      break;
+    }
+  }
+  
+  // If it's a new transmitter, add it to the list
+  if (!transmitterKnown && numTransmitters < MAX_TRANSMITTERS) {
+    knownTransmitters[numTransmitters] = packet->transmitterId;
+    numTransmitters++;
+    
+    // If no transmitter is selected yet, select this one
+    if (selectedTransmitterIndex == -1) {
+      selectedTransmitterIndex = numTransmitters - 1;
+      selectedTransmitterId = packet->transmitterId;
+    }
+  }
+  
+  // If this packet is not from the selected transmitter, ignore it
+  if (selectedTransmitterIndex != -1 && packet->transmitterId != selectedTransmitterId) {
+    return;
+  }
+  
+  // Convert fixed-point coordinates back to floating point
+  currentLat = packet->latitude / 1000000.0f;
+  currentLng = packet->longitude / 1000000.0f;
+  
+  // Record the time of the first packet for graphing time reference
+  if (millisAtFirstPacket == 0) {
+    millisAtFirstPacket = millis();
+  }
+  
+  lastPacketTime = millis();
+  packetCount++;
+  
+  updateDisplay();
+}
+
+// Process altitude packet
+void processAltitudePacket(uint8_t* buffer, size_t length) {
+  if (length < sizeof(AltitudePacket)) {
+    Serial.println("Altitude packet too small");
+    errorCount++;
+    return;
+  }
+  
+  AltitudePacket* packet = (AltitudePacket*)buffer;
+  
+  // Verify checksum
+  uint8_t calculatedChecksum = calculateChecksum(buffer, length - 1);
+  if (calculatedChecksum != packet->checksum) {
+    Serial.println("Altitude packet checksum mismatch");
+    errorCount++;
+    return;
+  }
+  
+  // If this packet is not from the selected transmitter, ignore it
+  if (selectedTransmitterIndex != -1 && packet->transmitterId != selectedTransmitterId) {
+    return;
+  }
+  
+  currentAltitude = packet->currentAltitude;
+  maxAltitude = packet->maxAltitude;
+  temperature = packet->temperature / 10.0f; // Convert back to degrees C
+  maxG = packet->maxG / 10.0f; // Convert back to g
+  launchState = packet->launchState;
+  
+  lastPacketTime = millis();
+  packetCount++;
+  
+  // Calculate speed from altitude changes
+  unsigned long currentTime = millis();
+  if (lastAltitudeTime > 0) {
+    // Calculate speed in m/s based on altitude change
+    float timeDelta = (currentTime - lastAltitudeTime) / 1000.0f; // seconds
+    if (timeDelta > 0) {
+      currentSpeed = (currentAltitude - lastAltitude) / timeDelta;
+      // Apply simple low-pass filter to smooth speed data
+      currentSpeed = 0.7f * currentSpeed + 0.3f * dataHistory[1][historyIndex > 0 ? historyIndex - 1 : MAX_DATA_POINTS - 1];
+    }
+  }
+  lastAltitude = currentAltitude;
+  lastAltitudeTime = currentTime;
+  
+  // Store data for graphs
+  dataHistory[0][historyIndex] = currentAltitude; // Altitude
+  dataHistory[1][historyIndex] = currentSpeed;    // Speed
+  dataHistory[2][historyIndex] = txPower;         // TX Power
+  timeHistory[historyIndex] = millis() - millisAtFirstPacket;
+  historyIndex = (historyIndex + 1) % MAX_DATA_POINTS;
+  historyCount = min(historyCount + 1, MAX_DATA_POINTS);
+  
+  updateDisplay();
+}
+
+// Process system data packet
+void processSystemPacket(uint8_t* buffer, size_t length) {
+  if (length < sizeof(SystemDataPacket)) {
+    Serial.println("System packet too small");
+    errorCount++;
+    return;
+  }
+  
+  SystemDataPacket* packet = (SystemDataPacket*)buffer;
+  
+  // Verify checksum
+  uint8_t calculatedChecksum = calculateChecksum(buffer, length - 1);
+  if (calculatedChecksum != packet->checksum) {
+    Serial.println("System packet checksum mismatch");
+    errorCount++;
+    return;
+  }
+  
+  // If this packet is not from the selected transmitter, ignore it
+  if (selectedTransmitterIndex != -1 && packet->transmitterId != selectedTransmitterId) {
+    return;
+  }
+  
+  // Update system data
+  rocketUptime = packet->uptime;
+  batteryVoltage = packet->batteryMillivolts / 1000.0f;
+  batteryPercent = packet->batteryPercent;
+  txPower = packet->txPower;
+  
+  lastPacketTime = millis();
+  packetCount++;
+  
+  updateDisplay();
+}
+
 // Send SNR feedback to the logger
 void sendSnrFeedback() {
-    // Only send feedback if we've received at least one packet
-    if (totalPackets == 0) {
-        return;
+    if (lastSnr == 0.0f || selectedTransmitterId == 0) {
+        return; // No SNR data to send or no transmitter selected
     }
     
-    // Create SNR feedback packet
     SnrFeedbackPacket packet;
     packet.version = PROTOCOL_VERSION;
-    packet.packetType = SNR_FEEDBACK_PACKET;
-    packet.subType = 0x01; // SNR data
+    packet.packetType = PACKET_TYPE_FEEDBACK;
+    packet.subType = FEEDBACK_SUBTYPE_SNR;
+    packet.transmitterId = selectedTransmitterId;
+    packet.snrValue = lastSnr;
+    packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
     
-    // Get current SNR from radio
-    packet.snrValue = radio->getSNR();
+    radio->transmit((uint8_t*)&packet, sizeof(packet));
     
-    // Calculate checksum
-    packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(SnrFeedbackPacket) - 1);
-    
-    // Transmit packet
-    if (radio->transmit((uint8_t*)&packet, sizeof(SnrFeedbackPacket))) {
-        Serial.print("Sent SNR feedback: ");
-        Serial.println(packet.snrValue);
-    } else {
-        Serial.println("Failed to send SNR feedback");
-    }
+    Serial.print("Sent SNR feedback to transmitter 0x");
+    Serial.print(selectedTransmitterId, HEX);
+    Serial.print(": ");
+    Serial.println(lastSnr);
 }
 
 void loop() {
@@ -515,31 +641,42 @@ void loop() {
     int packetSize = radio->receive(data, MAX_PACKET_SIZE);
     
     if (packetSize > 0) {
-        totalPackets++;
-        
         // Check packet version
         if (data[0] != PROTOCOL_VERSION) {
-            Serial.println(F("Invalid protocol version"));
-            badPackets++;
-            return;
-        }
-        
-        // Process packet based on type
-        switch (data[1]) {
-            case GPS_DATA_PACKET:
-                processGpsPacket(data);
-                // Send SNR feedback after processing GPS packets
-                if (millis() - lastSnrFeedbackTime >= SNR_FEEDBACK_INTERVAL) {
-                    sendSnrFeedback();
-                    lastSnrFeedbackTime = millis();
-                }
-                break;
-            case ALTITUDE_PACKET:
-                processAltitudePacket(data);
-                break;
-            default:
-                Serial.println(F("Unknown packet type"));
-                break;
+            Serial.println("Invalid protocol version");
+            errorCount++;
+        } else if (packetSize > 2) { // Minimum packet size (version + type + checksum)
+            uint8_t packetType = data[1];
+            
+            // Process packet based on type
+            switch (packetType) {
+                case PACKET_TYPE_GPS:
+                    processGpsPacket(data, packetSize);
+                    break;
+                    
+                case PACKET_TYPE_ALTITUDE:
+                    processAltitudePacket(data, packetSize);
+                    break;
+                    
+                case PACKET_TYPE_SYSTEM:
+                    processSystemPacket(data, packetSize);
+                    break;
+                    
+                default:
+                    Serial.print("Unknown packet type: ");
+                    Serial.println(packetType, HEX);
+                    errorCount++;
+                    break;
+            }
+            
+            // Get SNR from radio
+            lastSnr = radio->getSNR();
+            
+            // Send SNR feedback periodically
+            if (millis() - lastSnrFeedbackTime >= SNR_FEEDBACK_INTERVAL) {
+                sendSnrFeedback();
+                lastSnrFeedbackTime = millis();
+            }
         }
     }
     

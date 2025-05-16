@@ -5,14 +5,15 @@
  *  - receiver to send to rocket parameters/constants
  */
  
+#include <Arduino.h>
+#include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
-#include <Wire.h>
-#include <Adafruit_MPU6050.h>
-#include <Adafruit_Sensor.h>
-#include <Adafruit_BMP085_U.h>
 #include <TinyGPS++.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_BMP085_U.h>
 #include <MAX1704X.h>
+#include <algorithm> // For std::max
 
 // CC1101 configuration
 #define CC1101_CS 16  // D0 on NodeMCU
@@ -39,6 +40,7 @@ float maxG = 0.0f;
 const float TARGET_SNR = 15.0f;       // Target SNR for reliable communication (dB)
 const float SNR_HYSTERESIS = 5.0f;    // SNR hysteresis to prevent frequent power changes
 const float POWER_ADJUST_STEP = 2.0f; // Power adjustment step in dBm
+float txPower = 10.0f;                // Current transmission power in dBm
 
 // RGB LED pins
 #define LED_RED_PIN 0    // D3 on NodeMCU
@@ -73,6 +75,23 @@ float lastAltitude = 0.0f;
 bool relayActive = false;
 unsigned long primaryRelayActivationTime = 0;
 
+// Function prototypes
+void setLedRed();
+void setLedGreen();
+void setLedBlue();
+void setLedOff();
+void logGpsData(const GpsDataPacket& packet);
+void logAltitudeData(const AltitudePacket& packet);
+void getAltitudeAndTemp(float& altitude, float& temp);
+void sendGpsData();
+void sendSystemData();
+void sendAltitudeData();
+void processSnrFeedback(uint8_t* buffer, size_t length);
+void adjustTransmissionPower(float snr);
+
+// Get the unique chip ID for this transmitter
+uint32_t transmitterId = 0;
+
 TinyGPSPlus gps;
 // Using hardware Serial for GPS
 
@@ -84,6 +103,15 @@ void getAltitudeAndTemp(float& altitude, float& temp) {
 }
 
 void setup() {
+  // Initialize serial communication
+  Serial.begin(74880);
+  Serial.println("Rocket Data Logger Initializing...");
+  
+  // Get ESP8266 chip ID as transmitter ID
+  transmitterId = ESP.getChipId();
+  Serial.print("Transmitter ID: ");
+  Serial.println(transmitterId, HEX);
+  
   // Initialize RGB LED pins
   pinMode(LED_RED_PIN, OUTPUT);
   pinMode(LED_GREEN_PIN, OUTPUT);
@@ -108,7 +136,10 @@ void setup() {
   // Configure adaptive power control
   radio->setAdaptivePowerParams(TARGET_SNR, SNR_HYSTERESIS, POWER_ADJUST_STEP);
   
-  Serial.println("Radio initialized");
+  // Set the transmitter ID in the radio for SNR feedback filtering
+  radio->setTransmitterId(transmitterId);
+  
+  Serial.println("Radio initialized with transmitter ID: 0x" + String(transmitterId, HEX));
   
   Wire.begin(D2, D1);
   Serial.begin(74880);
@@ -218,199 +249,190 @@ void sendGpsData() {
         gps.encode(Serial.read());
     }
     
-    // Process any SNR feedback and adjust power if needed
-    radio->processSnrFeedbackAndAdjustPower(TARGET_SNR);
-    
     if (gps.location.isValid()) {
         GpsDataPacket packet;
         packet.version = PROTOCOL_VERSION;
-        packet.packetType = GPS_DATA_PACKET;
-        packet.timestamp = millis();
+        packet.packetType = PACKET_TYPE_GPS;
+        packet.transmitterId = transmitterId;
         packet.latitude = gps.location.lat() * 10000000;
         packet.longitude = gps.location.lng() * 10000000;
-        packet.altitude = (uint16_t)(gps.altitude.meters() * 10.0f);
-        packet.batteryMillivolts = (uint16_t)(lipo.voltage() * 1000);
-        packet.batteryPercent = (uint8_t)lipo.percent();
-        packet.txPower = (int8_t)radio->getCurrentPower();
-        packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(GpsDataPacket) - 1);
-        if (radio->transmit((uint8_t*)&packet, sizeof(packet)) != RADIOLIB_ERR_NONE) {
-            Serial.println("Failed to send GPS data");
-        } else {
-            Serial.println("Sent GPS data");
-        }
+        packet.altitude = gps.altitude.meters();
+        packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
+        
+        radio->transmit((uint8_t*)&packet, sizeof(packet));
     }
+}
+
+void sendSystemData() {
+  SystemDataPacket packet;
+  packet.version = PROTOCOL_VERSION;
+  packet.packetType = PACKET_TYPE_SYSTEM;
+  packet.transmitterId = transmitterId;
+  packet.uptime = millis();
+  packet.batteryMillivolts = (uint16_t)(lipo.voltage() * 1000);
+  packet.batteryPercent = (uint8_t)lipo.percent();
+  packet.txPower = (int8_t)radio->getCurrentPower();
+  packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
+  
+  radio->transmit((uint8_t*)&packet, sizeof(packet));
 }
 
 void sendAltitudeData() {
-    float currentAltitude;
-    float temp;
-    getAltitudeAndTemp(currentAltitude, temp);
-    
-    if (currentAltitude > maxAltitude) {
-        maxAltitude = currentAltitude;
-    }
-    
-    AltitudePacket packet;
-    packet.version = PROTOCOL_VERSION;
-    packet.packetType = ALTITUDE_PACKET;
-    packet.timestamp = millis();
-    packet.currentAltitude = currentAltitude;
-    packet.maxAltitude = maxAltitude;
-    packet.temperature = temp;
-    packet.maxG = maxG;
-    packet.launchState = launchDetected;
-    packet.txPower = (int8_t)radio->getCurrentPower();
-    
-    // Calculate checksum
-    packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(AltitudePacket) - 1);
-    
-    if (radio->transmit((uint8_t*)&packet, sizeof(packet)) != RADIOLIB_ERR_NONE) {
-        Serial.println("Failed to send altitude data");
-    } else {
-        Serial.println("Sent altitude data");
-    }
+  float altitude;
+  float temperature;
+  getAltitudeAndTemp(altitude, temperature);
+  
+  if (altitude > maxAltitude) {
+    maxAltitude = altitude;
+  }
+  
+  AltitudePacket packet;
+  packet.version = PROTOCOL_VERSION;
+  packet.packetType = PACKET_TYPE_ALTITUDE;
+  packet.transmitterId = transmitterId;
+  packet.currentAltitude = altitude;
+  packet.maxAltitude = maxAltitude;
+  packet.temperature = temperature * 10; // Store with 0.1°C precision
+  packet.maxG = maxG * 10; // Store with 0.1g precision
+  packet.launchState = launchDetected ? 1 : 0;
+  packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
+  
+  radio->transmit((uint8_t*)&packet, sizeof(packet));
 }
 
 void loop() {
-        // Get current battery percentage with hysteresis to prevent rapid mode switching
-    static bool lowBatteryMode = false;
-    uint8_t batteryPercent = (uint8_t)lipo.percent();
-    
-    // Add hysteresis: enter low power mode at 45%, exit at 55%
-    if (lowBatteryMode && batteryPercent >= 55) {
-        lowBatteryMode = false;
-        Serial.println("Exiting low battery mode");
-    } else if (!lowBatteryMode && batteryPercent <= 45) {
-        lowBatteryMode = true;
-        Serial.println("Entering low battery mode");
+  // Get current battery percentage with hysteresis to prevent rapid mode switching
+  static bool lowBatteryMode = false;
+  uint8_t batteryPercent = (uint8_t)lipo.percent();
+  
+  // Add hysteresis: enter low power mode at 45%, exit at 55%
+  if (lowBatteryMode && batteryPercent >= 55) {
+    lowBatteryMode = false;
+    Serial.println("Exiting low battery mode");
+  } else if (!lowBatteryMode && batteryPercent <= 45) {
+    lowBatteryMode = true;
+    Serial.println("Entering low battery mode");
+  }
+  
+  // Send GPS data (every 10 seconds in low battery mode, every second in normal mode)
+  static unsigned long lastGpsSend = 0;
+  unsigned long gpsInterval = lowBatteryMode ? 10000 : 1000;
+  
+  if (millis() - lastGpsSend >= gpsInterval) {
+    // Wake up radio if it was sleeping
+    if (lowBatteryMode) {
+      radio->wake();
+      delay(10); // Small delay to ensure radio is ready
     }
     
-    // Send GPS data (every 10 seconds in low battery mode, every second in normal mode)
-    static unsigned long lastGpsSend = 0;
-    unsigned long gpsInterval = lowBatteryMode ? 10000 : 1000;
+    // Send GPS data
+    sendGpsData();
+    sendSystemData();
     
-    if (millis() - lastGpsSend >= gpsInterval) {
-        // Wake up radio if it was sleeping
-        if (lowBatteryMode) {
-            radio->wake();
-            delay(10); // Small delay to ensure radio is ready
-        }
-        
-        // Store current time before sending to ensure accurate timing
-        lastGpsSend = millis();
-        
-        // Send GPS data
-        sendGpsData();
-        
-        // Put radio to sleep in low battery mode, with a small delay to ensure transmission is complete
-        if (lowBatteryMode) {
-            delay(50); // Allow time for the transmission to complete
-            radio->sleep();
-        }
+    lastGpsSend = millis();
+    
+    // Put radio to sleep in low battery mode
+    if (lowBatteryMode) {
+      delay(50); // Allow time for the transmission to complete
+      radio->sleep();
+    }
+  }
+  
+  // Send altitude data every 100ms (only in normal battery mode)
+  static unsigned long lastAltSend = 0;
+  if (!lowBatteryMode && millis() - lastAltSend >= 100) {
+    sendAltitudeData();
+    lastAltSend = millis();
+  }
+  
+  // Process GPS data
+  while (Serial.available() > 0) {
+    gps.encode(Serial.read());
+  }
+  
+  // Process any SNR feedback packets and adjust power if needed
+  if (radio->available()) {
+    radio->processSnrFeedbackAndAdjustPower(TARGET_SNR);
+    // Update our local txPower variable to match the radio's current power
+    txPower = radio->getCurrentPower();
+  }
+  
+  // Process IMU data
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+  
+  float altitude, temperature;
+  getAltitudeAndTemp(altitude, temperature);
+  
+  // Check for launch and handle deployment    
+  if (launchDetected) {
+    if (!relayActive && altitude < lastAltitude - ALTITUDE_DROP_THRESHOLD) {
+      relayActive = true;
+      digitalWrite(PRIMARY_RELAY_PIN, HIGH);
+      primaryRelayActivationTime = micros();
+      Serial.println("Primary relay activated");
     }
     
-    // Send altitude data every 100ms (only in normal battery mode)
-    static unsigned long lastAltSend = 0;
-    if (!lowBatteryMode && millis() - lastAltSend >= 100) {
-        sendAltitudeData();
-        lastAltSend = millis();
+    if (relayActive && micros() - primaryRelayActivationTime >= BACKUP_DELAY) {
+      digitalWrite(BACKUP_RELAY_PIN, HIGH);
+      Serial.println("Backup relay activated");
     }
     
-    // Process GPS data
-    while (Serial.available() > 0) {
-        gps.encode(Serial.read());
-    }
-    
-    // Process IMU data
-    sensors_event_t a, g;
-    sensors_event_t temp;
-    mpu.getEvent(&a, &g, &temp);
-
-    float altitude, temperature;
-    getAltitudeAndTemp(altitude, temperature);
-
-    // Check for launch and handle deployment    
-    if (launchDetected) {
-        if (!relayActive && altitude < lastAltitude - ALTITUDE_DROP_THRESHOLD) {
-            relayActive = true;
-            digitalWrite(PRIMARY_RELAY_PIN, HIGH);
-            primaryRelayActivationTime = micros();
-            Serial.println("Primary relay activated");
-        }
-        
-        if (relayActive && micros() - primaryRelayActivationTime >= BACKUP_DELAY) {
-            digitalWrite(BACKUP_RELAY_PIN, HIGH);
-            Serial.println("Backup relay activated");
-        }
-        
-        lastAltitude = altitude;
-    }
-    
-    // Compute total acceleration magnitude
-    float aTotal = sqrt(a.acceleration.x * a.acceleration.x 
-                      + a.acceleration.y * a.acceleration.y 
-                      + a.acceleration.z * a.acceleration.z);
-    maxG = max(maxG, aTotal);
-    
-    // Launch detection
-    if (!launchDetected && aTotal > 1.7) { 
-      Serial.println("Launch detected!");
-      launchDetected = true;
-      setLedBlue();  // Blue indicates launch detected
-    }
-    
-    // Landed detection
-    // Consider landed if we've detected launch, the parachute has been deployed (relayActive),
-    // and altitude has remained within a small range of the maximum altitude
-    static unsigned long landingCheckStartTime = 0;
-    static float initialLandingAltitude = 0;
-    static float maxAltitudeDifference = 0;
-    
-    if (launchDetected && relayActive && !landedDetected) {
-      // First time we're checking for landing after parachute deployment
-      if (landingCheckStartTime == 0) {
-        landingCheckStartTime = millis();
-        initialLandingAltitude = altitude;
-      } else {
-        // Track the maximum altitude difference we've seen
-        float currentDifference = abs(altitude - initialLandingAltitude);
-        maxAltitudeDifference = max(maxAltitudeDifference, currentDifference);
-        
-        // We've been monitoring for at least 10 seconds
-        if (millis() - landingCheckStartTime > 10000) {
-          // If max altitude difference is less than 2 meters in the last 10 seconds, consider it landed
-          if (maxAltitudeDifference < 2.0) {
-            landedDetected = true;
-            landedTime = millis();
-            Serial.println("Landing detected! Altitude stable near " + String(altitude) + "m");
-            Serial.println("Maximum altitude variation: " + String(maxAltitudeDifference) + "m");
-            setLedGreen();  // Green indicates landed
-          } else {
-            // Reset the check if we've seen too much variation
-            landingCheckStartTime = millis();
-            initialLandingAltitude = altitude;
-            maxAltitudeDifference = 0;
-            Serial.println("Reset landing detection, too much altitude variation: " + String(maxAltitudeDifference) + "m");
-          }
+    lastAltitude = altitude;
+  }
+  
+  // Compute total acceleration magnitude
+  float aTotal = sqrt(a.acceleration.x * a.acceleration.x 
+                     + a.acceleration.y * a.acceleration.y 
+                     + a.acceleration.z * a.acceleration.z);
+  // Use Arduino's max function with explicit type casting
+  maxG = max(maxG, (float)(aTotal / 9.8f)); // Convert to g units
+  
+  // Launch detection
+  if (!launchDetected && aTotal > 1.7 * 9.8) { // 1.7g threshold
+    Serial.println("Launch detected!");
+    launchDetected = true;
+    setLedBlue();  // Blue indicates launch detected
+  }
+  
+  // Landed detection
+  static unsigned long landingCheckStartTime = 0;
+  static float initialLandingAltitude = 0;
+  static float maxAltitudeDifference = 0;
+  static bool landedDetected = false;
+  
+  if (launchDetected && relayActive && !landedDetected) {
+    // First time we're checking for landing after parachute deployment
+    if (landingCheckStartTime == 0) {
+      landingCheckStartTime = millis();
+      initialLandingAltitude = altitude;
+    } else {
+      // Track the maximum altitude difference we've seen
+      float currentDifference = abs(altitude - initialLandingAltitude);
+      maxAltitudeDifference = max(maxAltitudeDifference, currentDifference);
+      
+      // We've been monitoring for at least 10 seconds
+      if (millis() - landingCheckStartTime > 10000) {
+        // If max altitude difference is less than 2 meters in the last 10 seconds, consider it landed
+        if (maxAltitudeDifference < 2.0) {
+          landedDetected = true;
+          Serial.println("Landing detected! Altitude stable near " + String(altitude) + "m");
+          Serial.println("Maximum altitude variation: " + String(maxAltitudeDifference) + "m");
+          setLedGreen();  // Green indicates landed
+        } else {
+          // Reset the check if we've seen too much variation
+          landingCheckStartTime = millis();
+          initialLandingAltitude = altitude;
+          maxAltitudeDifference = 0;
+          Serial.println("Reset landing detection, too much altitude variation: " + String(maxAltitudeDifference) + "m");
         }
       }
     }
-    
-    // Check altitude drop
-    if (lastAltitude > 0.0f) {
-      float altitudeChange = lastAltitude - altitude;
-      if (altitudeChange >= ALTITUDE_DROP_THRESHOLD && !relayActive) {
-        // Altitude has dropped by the threshold amount
-        relayActive = true;
-        digitalWrite(PRIMARY_RELAY_PIN, HIGH);
-        Serial.println("Altitude drop detected - Primary relay activated");
-        primaryRelayActivationTime = micros();
-      }
-    }
-    
-    // Check if backup relay should be activated
-    if (relayActive && !digitalRead(BACKUP_RELAY_PIN)) {
-    unsigned long timeSincePrimary = micros() - primaryRelayActivationTime;
+  }
+  
+  // Check if backup relay should be activated
+  if (relayActive) {
+    unsigned long timeSincePrimary = millis() - primaryRelayActivationTime;
     if (timeSincePrimary >= BACKUP_DELAY) {
       digitalWrite(BACKUP_RELAY_PIN, HIGH);
       Serial.println("Backup relay activated");
@@ -418,20 +440,14 @@ void loop() {
   }
   
   lastAltitude = altitude;
-
-  // GPS data is already read at the beginning of the loop
   
- // gps.location.lat(), gps.location.lng(), gps.speed.kmph(), gps.altitude.meters()
-//  gps.date.year(), month(), day(), hour(), minute(), second(), 
   // Determine if we should log to SD card based on landed state
   static unsigned long lastLogTime = 0;
   bool shouldLog = false;
   
   if (!landedDetected) {
-    // Normal logging frequency before landing
     shouldLog = true;
   } else {
-    // Reduced logging frequency after landing (once per minute)
     if (millis() - lastLogTime >= 60000) { // 60 seconds
       shouldLog = true;
       lastLogTime = millis();
@@ -439,19 +455,29 @@ void loop() {
   }
   
   if (shouldLog) {
-    snprintf(line, sizeof(line), "%lu,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f", micros(), 
-              g.gyro.x, g.gyro.y, g.gyro.z,  // divide by 131.0 to convert to degrees per second
-              a.acceleration.x, a.acceleration.y, a.acceleration.z,  // divide by 16384.0 to convert to accel in G
-              gps.speed.mps(), gps.altitude.meters(),
-              altitude, temperature);
-    Textfile.println(line);
-    Serial.println(line);
-    
-    // Always flush after logging in landed state to ensure data is written
-    if (landedDetected || micros() - lastFlush > 1000000) { 
-      Textfile.flush();
-      lastFlush = micros();
+    // Log data to SD card
+    if (Textfile) {
+      sprintf(line, "%lu,%0.6f,%0.6f,%0.1f,%0.1f,%0.1f,%0.1f,%d,%d,%d,%d",
+              millis(),
+              gps.location.lat(),
+              gps.location.lng(),
+              altitude,
+              temperature,
+              maxAltitude,
+              maxG,
+              launchDetected ? 1 : 0,
+              landedDetected ? 1 : 0,
+              (int)lipo.voltage(),
+              (int)lipo.percent());
+      Textfile.println(line);
     }
+  }  
+  // Always flush after logging in landed state to ensure data is written
+  if (landedDetected || micros() - lastFlush > 1000000) { 
+    Textfile.flush();
+    lastFlush = micros();
   }
-  delay(50); // millis
+  
+  // Small delay to prevent CPU hogging
+  delay(50);
 }

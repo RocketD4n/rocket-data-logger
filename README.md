@@ -2,6 +2,15 @@
 
 This project is a rocket telemetry system that logs GPS data, altitude, and IMU sensor readings, and transmits this data wirelessly using either a CC1101 or SX1278 (LoRa) radio module. It also logs to a local SD card.
 
+## Key Features
+
+- **Real-time Telemetry**: Transmits altitude, GPS, battery, and sensor data in real-time using optimized packet structures
+- **Multi-transmitter Support**: Automatically detects and allows selection between multiple rocket transmitters using unique ESP8266 chip IDs
+- **Adaptive Power Management**: Adjusts transmission power based on signal strength feedback to optimize battery life
+- **Data Visualization**: Multiple graph pages showing altitude, speed, and transmission power over time
+- **Touchscreen Interface**: Easy navigation between data pages and transmitter selection
+- **Power-saving Mode**: Automatically reduces transmission frequency when battery is low (<45%)
+
 ## Hardware Requirements
 
 ### Data Logger (Rocket)
@@ -102,6 +111,86 @@ The fourth page displays the transmission power over time, showing how the adapt
 |    +---------------------------------------->         |
 |                      Time (s)                         |
 +------------------------------------------------------+
+```
+
+### Page 5: Transmitter Selection
+
+The fifth page allows the user to select which transmitter to monitor when multiple rockets are in range:
+
+```
++------------------------------------------------------+
+| <           Select Transmitter                     > |
+|                                                       |
+|    Transmitter ID: 0xA1B2C3D4 (selected)             |
+|    Uptime: 00:15:32                                  |
+|                                                       |
+|    Transmitter ID: 0xE5F6G7H8                        |
+|    Uptime: 00:05:12                                  |
+|                                                       |
+|    Transmitter ID: 0xI9J0K1L2                        |
+|    Uptime: 00:23:45                                  |
+|                                                       |
+|    Tap an ID to select that transmitter              |
+|                                                       |
++------------------------------------------------------+
+```
+
+## Telemetry Protocol
+
+The telemetry system uses a custom protocol with three distinct packet types to optimize data transmission:
+
+### GPS Data Packet (Type 0x01)
+```
+struct GpsDataPacket {
+    uint8_t version;        // Protocol version (0x01)
+    uint8_t packetType;     // 0x01 for GPS data
+    uint32_t transmitterId; // Unique ID of the transmitter
+    uint32_t latitude;      // Fixed-point latitude (degrees * 1,000,000)
+    uint32_t longitude;     // Fixed-point longitude (degrees * 1,000,000)
+    uint16_t altitude;      // Altitude in meters
+    uint8_t checksum;       // XOR checksum of all previous bytes
+};
+```
+
+### Altitude Packet (Type 0x02)
+```
+struct AltitudePacket {
+    uint8_t version;        // Protocol version (0x01)
+    uint8_t packetType;     // 0x02 for altitude data
+    uint32_t transmitterId; // Unique ID of the transmitter
+    uint16_t currentAltitude; // Current altitude in meters
+    uint16_t maxAltitude;   // Maximum recorded altitude in meters
+    uint16_t temperature;   // Temperature in degrees C * 10
+    uint16_t maxG;          // Maximum G-force * 10
+    uint8_t launchState;    // 0=waiting, 1=launched, 2=landed
+    uint8_t checksum;       // XOR checksum of all previous bytes
+};
+```
+
+### System Data Packet (Type 0x03)
+```
+struct SystemDataPacket {
+    uint8_t version;        // Protocol version (0x01)
+    uint8_t packetType;     // 0x03 for system data
+    uint32_t transmitterId; // Unique ID of the transmitter
+    uint32_t uptime;        // Milliseconds since boot
+    uint16_t batteryMillivolts; // Battery voltage in millivolts
+    uint8_t batteryPercent; // Battery percentage (0-100)
+    int8_t txPower;         // Current transmission power in dBm
+    uint8_t checksum;       // XOR checksum of all previous bytes
+};
+```
+
+### SNR Feedback Packet (Type 0xFF)
+```
+struct SnrFeedbackPacket {
+    uint8_t version;        // Protocol version (0x01)
+    uint8_t packetType;     // 0xFF for feedback packets
+    uint8_t subType;        // 0x01 for SNR data
+    uint32_t transmitterId; // Transmitter ID this feedback is for
+    float snrValue;         // Current SNR value measured by receiver
+    uint8_t checksum;       // XOR checksum of all previous bytes
+};
 ```
 
 ## Pin Configuration
@@ -235,21 +324,32 @@ struct SnrFeedbackPacket {
 
 ## Features
 
-1. GPS Data Logging
+1. **Dual Radio Support**
+   - CC1101 Radio: Simple, low-power FSK radio
+   - SX1278 (LoRa) Radio: Long-range, high-reliability radio
+   - Automatic detection and configuration of whichever radio is connected
+
+2. **Multi-Transmitter Support**
+   - Each transmitter has a unique ID based on the ESP8266 chip ID
+   - Receiver automatically detects all transmitters in range
+   - User can select which transmitter to monitor via the touchscreen
+   - Allows multiple rockets to operate simultaneously on the same frequency
+
+3. **GPS Data Logging**
    - Latitude/Longitude
    - Altitude
    - Timestamps
 
-2. Altitude Tracking
+4. **Altitude Tracking**
    - Current altitude
    - Maximum recorded altitude
    - Pressure-based altitude calculation
 
-3. IMU Data
+5. **IMU Data**
    - Accelerometer readings
    - Gyroscope readings
 
-4. Wireless Transmission
+6. **Wireless Transmission**
    - 433MHz radio
    - Error detection
    - Adaptive power management

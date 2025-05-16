@@ -14,20 +14,32 @@ protected:
     unsigned long lastPowerAdjustTime = 0;
     float currentPower = 10.0f;
     
+    // Local transmitter ID
+    uint32_t transmitterId = 0;
+    
     // Process SNR feedback packet
     bool processSnrFeedbackPacket(uint8_t* data, int length) {
         if (length >= sizeof(SnrFeedbackPacket) && 
             data[0] == PROTOCOL_VERSION && 
-            data[1] == SNR_FEEDBACK_PACKET && 
-            data[2] == 0x01) {
+            data[1] == PACKET_TYPE_FEEDBACK && 
+            data[2] == FEEDBACK_SUBTYPE_SNR) {
             
-            // Extract SNR value
+            // Extract packet data
             SnrFeedbackPacket* packet = (SnrFeedbackPacket*)data;
-            lastReceivedSnr = packet->snrValue;
             
-            Serial.print("Received SNR feedback: ");
-            Serial.println(lastReceivedSnr);
-            return true;
+            // Verify this packet is for our transmitter
+            if (packet->transmitterId == transmitterId) {
+                lastReceivedSnr = packet->snrValue;
+                
+                Serial.print("Received SNR feedback for transmitter 0x");
+                Serial.print(transmitterId, HEX);
+                Serial.print(": ");
+                Serial.println(lastReceivedSnr);
+                return true;
+            } else {
+                Serial.print("Ignoring SNR feedback for different transmitter 0x");
+                Serial.println(packet->transmitterId, HEX);
+            }
         }
         return false;
     }
@@ -65,6 +77,13 @@ public:
     
     // Get current output power level (in dBm)
     virtual float getCurrentPower() = 0;
+    
+    // Set the transmitter ID for filtering SNR feedback packets
+    void setTransmitterId(uint32_t id) {
+        transmitterId = id;
+        Serial.print("Radio transmitter ID set to 0x");
+        Serial.println(transmitterId, HEX);
+    }
     
     // Process any received SNR feedback and adjust power if needed
     // Returns true if SNR feedback was received and processed
