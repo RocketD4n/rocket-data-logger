@@ -28,6 +28,8 @@ Radio* radio = new CC1101Radio(CC1101_CS, CC1101_GDO0, RADIOLIB_NC);
 uint16_t maxAltitude = 0;
 unsigned long lastFlush = 0;
 bool launchDetected = false;
+bool landedDetected = false;
+unsigned long landedTime = 0;
 char line[256];
 float maxG = 0.0f;
 
@@ -332,10 +334,49 @@ void loop() {
                       + a.acceleration.y * a.acceleration.y 
                       + a.acceleration.z * a.acceleration.z);
     maxG = max(maxG, aTotal);
+    
+    // Launch detection
     if (!launchDetected && aTotal > 1.7) { 
       Serial.println("Launch detected!");
       launchDetected = true;
       setLedBlue();  // Blue indicates launch detected
+    }
+    
+    // Landed detection
+    // Consider landed if we've detected launch, the parachute has been deployed (relayActive),
+    // and altitude has remained within a small range of the maximum altitude
+    static unsigned long landingCheckStartTime = 0;
+    static float initialLandingAltitude = 0;
+    static float maxAltitudeDifference = 0;
+    
+    if (launchDetected && relayActive && !landedDetected) {
+      // First time we're checking for landing after parachute deployment
+      if (landingCheckStartTime == 0) {
+        landingCheckStartTime = millis();
+        initialLandingAltitude = altitude;
+      } else {
+        // Track the maximum altitude difference we've seen
+        float currentDifference = abs(altitude - initialLandingAltitude);
+        maxAltitudeDifference = max(maxAltitudeDifference, currentDifference);
+        
+        // We've been monitoring for at least 10 seconds
+        if (millis() - landingCheckStartTime > 10000) {
+          // If max altitude difference is less than 2 meters in the last 10 seconds, consider it landed
+          if (maxAltitudeDifference < 2.0) {
+            landedDetected = true;
+            landedTime = millis();
+            Serial.println("Landing detected! Altitude stable near " + String(altitude) + "m");
+            Serial.println("Maximum altitude variation: " + String(maxAltitudeDifference) + "m");
+            setLedGreen();  // Green indicates landed
+          } else {
+            // Reset the check if we've seen too much variation
+            landingCheckStartTime = millis();
+            initialLandingAltitude = altitude;
+            maxAltitudeDifference = 0;
+            Serial.println("Reset landing detection, too much altitude variation: " + String(maxAltitudeDifference) + "m");
+          }
+        }
+      }
     }
     
     // Check altitude drop
@@ -365,16 +406,35 @@ void loop() {
   
  // gps.location.lat(), gps.location.lng(), gps.speed.kmph(), gps.altitude.meters()
 //  gps.date.year(), month(), day(), hour(), minute(), second(), 
-  snprintf(line, sizeof(line), "%lu,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f", micros(), 
-            g.gyro.x, g.gyro.y, g.gyro.z,  // divide by 131.0 to convert to degrees per second
-            a.acceleration.x, a.acceleration.y, a.acceleration.z,  // divide by 16384.0 to convert to accel in G
-            gps.speed.mps(), gps.altitude.meters(),
-            altitude, temperature);
-  Textfile.println(line);
-  Serial.println(line);
-  if (micros() - lastFlush > 1000000) { // flush to write the file from the memory buffer at least every second
-    Textfile.flush();
-    lastFlush = micros();
+  // Determine if we should log to SD card based on landed state
+  static unsigned long lastLogTime = 0;
+  bool shouldLog = false;
+  
+  if (!landedDetected) {
+    // Normal logging frequency before landing
+    shouldLog = true;
+  } else {
+    // Reduced logging frequency after landing (once per minute)
+    if (millis() - lastLogTime >= 60000) { // 60 seconds
+      shouldLog = true;
+      lastLogTime = millis();
+    }
+  }
+  
+  if (shouldLog) {
+    snprintf(line, sizeof(line), "%lu,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f", micros(), 
+              g.gyro.x, g.gyro.y, g.gyro.z,  // divide by 131.0 to convert to degrees per second
+              a.acceleration.x, a.acceleration.y, a.acceleration.z,  // divide by 16384.0 to convert to accel in G
+              gps.speed.mps(), gps.altitude.meters(),
+              altitude, temperature);
+    Textfile.println(line);
+    Serial.println(line);
+    
+    // Always flush after logging in landed state to ensure data is written
+    if (landedDetected || micros() - lastFlush > 1000000) { 
+      Textfile.flush();
+      lastFlush = micros();
+    }
   }
   delay(50); // millis
 }
