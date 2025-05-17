@@ -3,7 +3,7 @@
 
 // Constructor
 RocketMonitorScreen::RocketMonitorScreen(TFT_eSPI& tft, XPT2046_Touchscreen& ts)
-    : tft(tft), ts(ts), currentPage(4), rocketSelected(false), 
+    : tft(tft), ts(ts), currentPage(PAGE_TRANSMITTER_SELECTION), rocketSelected(false), 
       numTransmitters(0), selectedTransmitterIndex(-1), selectedTransmitterId(0),
       historyIndex(0), historyCount(0), millisAtFirstPacket(0),
       showKeyboard(false), editingName(false), editingTransmitterIndex(-1)
@@ -48,7 +48,8 @@ void RocketMonitorScreen::begin() {
     // Load saved rocket names
     loadRocketNames();
     
-    // Draw initial screen
+    // Set initial page and draw it
+    currentPage = PAGE_TRANSMITTER_SELECTION;
     drawTransmitterSelectionPage();
 }
 
@@ -152,10 +153,7 @@ void RocketMonitorScreen::addTransmitter(uint32_t transmitterId) {
         if (numTransmitters == 1) {
             selectedTransmitterIndex = 0;
             selectedTransmitterId = transmitterId;
-            rocketSelected = true;
-            
-            // Switch to main data page after first rocket is found
-            currentPage = 0;
+            rocketSelected = true;  
             updateDisplay();
         }
     }
@@ -297,7 +295,7 @@ void RocketMonitorScreen::drawNavigationButtons(bool rocketSelected) {
     tft.setTextDatum(TL_DATUM);
 }
 
-// Draw the main data page (page 0)
+// Draw the main data page
 void RocketMonitorScreen::drawMainPage() {
     tft.fillScreen(TFT_BLACK);
     drawBatteryIndicator(batteryPercent);
@@ -356,7 +354,7 @@ void RocketMonitorScreen::drawMainPage() {
 
 // Update just the values on the main page
 void RocketMonitorScreen::updateMainPageValues() {
-    if (currentPage != 0) return;
+    if (currentPage != PAGE_MAIN) return;
     
     tft.setTextColor(VALUE_COLOR, TFT_BLACK);
     
@@ -404,10 +402,13 @@ void RocketMonitorScreen::updateMainPageValues() {
     tft.drawString(statsStr + "  ", 10, HEADER_HEIGHT + VALUE_HEIGHT * 5);
 }
 
-// Draw graph page (pages 1-3)
+// Draw graph page
 void RocketMonitorScreen::drawGraphPage() {
-    int graphPage = currentPage - 1; // 0=altitude, 1=speed, 2=txPower
-    if (graphPage < 0 || graphPage > 2) return;
+    int graphPage;
+    if (currentPage == PAGE_ALTITUDE_GRAPH) graphPage = 0;
+    else if (currentPage == PAGE_SPEED_GRAPH) graphPage = 1;
+    else if (currentPage == PAGE_POWER_GRAPH) graphPage = 2;
+    else return; // Not a graph page
     
     tft.fillScreen(TFT_BLACK);
     drawBatteryIndicator(batteryPercent);
@@ -439,8 +440,11 @@ void RocketMonitorScreen::drawGraphPage() {
 
 // Update graph data points
 void RocketMonitorScreen::updateGraph() {
-    if (currentPage < 1 || currentPage > 3) return;
-    int graphPage = currentPage - 1; // 0=altitude, 1=speed, 2=txPower
+    int graphPage;
+    if (currentPage == PAGE_ALTITUDE_GRAPH) graphPage = 0;
+    else if (currentPage == PAGE_SPEED_GRAPH) graphPage = 1;
+    else if (currentPage == PAGE_POWER_GRAPH) graphPage = 2;
+    else return; // Not a graph page
     
     // Find min and max values for scaling
     float minVal = 0;
@@ -519,7 +523,7 @@ void RocketMonitorScreen::updateGraph() {
     tft.setTextDatum(TL_DATUM);
 }
 
-// Draw transmitter selection page (page 4)
+// Draw transmitter selection page
 void RocketMonitorScreen::drawTransmitterSelectionPage() {
     tft.fillScreen(TFT_BLACK);
     drawBatteryIndicator(batteryPercent);
@@ -656,7 +660,7 @@ bool RocketMonitorScreen::handleTouch(int x, int y) {
     // Check for left navigation button
     if (isTouchInButton(x, y, NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
         // Go to previous page
-        currentPage = (currentPage - 1 + NUM_PAGES) % NUM_PAGES;
+        currentPage = static_cast<ScreenPage>((static_cast<int>(currentPage) - 1) % NUM_PAGES);
         updateDisplay();
         return true;
     }
@@ -664,7 +668,7 @@ bool RocketMonitorScreen::handleTouch(int x, int y) {
     // Check for right navigation button
     if (isTouchInButton(x, y, tft.width() - NAV_BUTTON_MARGIN - NAV_BUTTON_WIDTH, NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
         // Go to next page
-        currentPage = (currentPage + 1) % NUM_PAGES;
+        currentPage = static_cast<ScreenPage>((static_cast<int>(currentPage) + 1) % NUM_PAGES);
         updateDisplay();
         return true;
     }
@@ -674,7 +678,7 @@ bool RocketMonitorScreen::handleTouch(int x, int y) {
 
 // Handle page-specific touch events
     switch (currentPage) {
-        case 0: // Main data page
+        case PAGE_MAIN:
             // If showing abort confirmation dialog, handle that first
             if (showingAbortConfirmation) {
                 // Check if YES button was pressed
@@ -770,7 +774,7 @@ bool RocketMonitorScreen::handleTouch(int x, int y) {
             }
             break;
             
-        case 4: // Transmitter selection page
+        case PAGE_TRANSMITTER_SELECTION:
             // Check for transmitter selection
             for (int i = 0; i < numTransmitters; i++) {
                 int yPos = 50 + i * 40;
@@ -781,14 +785,14 @@ bool RocketMonitorScreen::handleTouch(int x, int y) {
                     rocketSelected = true;
                     
                     // Switch to main data page
-                    currentPage = 0;
+                    currentPage = PAGE_MAIN;
                     updateDisplay();
                     return true;
                 }
             }
             break;
             
-        case 5: // Last known positions page
+        case PAGE_LAST_POSITIONS:
             // Check for clear buttons
             int yPos = 50;
             for (int i = 0; i < numTransmitters; i++) {
@@ -873,21 +877,21 @@ void RocketMonitorScreen::processKeyPress(int x, int y) {
 // Update display based on current page
 void RocketMonitorScreen::updateDisplay() {
     switch (currentPage) {
-        case 0: // Main data page
+        case PAGE_MAIN:
             drawMainPage();
             break;
-        case 1: // Altitude graph
-        case 2: // Speed graph
-        case 3: // TX Power graph
+        case PAGE_ALTITUDE_GRAPH:
+        case PAGE_SPEED_GRAPH:
+        case PAGE_POWER_GRAPH:
             drawGraphPage();
             break;
-        case 4: // Orientation page
+        case PAGE_ORIENTATION:
             drawOrientationPage();
             break;
-        case 5: // Last positions page
+        case PAGE_LAST_POSITIONS:
             drawLastPositionsPage();
             break;
-        case 6: // Transmitter selection page
+        case PAGE_TRANSMITTER_SELECTION:
             drawTransmitterSelectionPage();
             break;
         default:
@@ -1074,7 +1078,7 @@ void RocketMonitorScreen::drawOrientationPage() {
 // Update orientation data display
 void RocketMonitorScreen::updateOrientationData() {
     // Only update the dynamic parts of the orientation page
-    if (currentPage == 4) { // Orientation page
+    if (currentPage == PAGE_ORIENTATION) {
         // Update tilt angle
         tft.fillRect(180, 50, 100, 20, TFT_BLACK);
         tft.setTextSize(2);

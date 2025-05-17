@@ -18,11 +18,22 @@ public:
     void begin();
     void sleepDisplay();
     
+    // Screen page enum
+    enum ScreenPage {
+        PAGE_MAIN = 0,
+        PAGE_ALTITUDE_GRAPH = 1,
+        PAGE_SPEED_GRAPH = 2,
+        PAGE_POWER_GRAPH = 3,
+        PAGE_ORIENTATION = 4,
+        PAGE_LAST_POSITIONS = 5,
+        PAGE_TRANSMITTER_SELECTION = 6,
+        NUM_PAGES
+    };
+    
     // Constants
     static const int MAX_TRANSMITTERS = 10;
     static const int MAX_NAME_LENGTH = 16;
     static const int MAX_DATA_POINTS = 100;
-    static const int NUM_PAGES = 7; // Main page + 3 graph pages + orientation page + last positions page + transmitter selection page
     
     // Display layout constants
     static const int HEADER_HEIGHT = 30;
@@ -77,8 +88,8 @@ public:
     void loadRocketNames();
     
     // Getters and setters
-    int getCurrentPage() const { return currentPage; }
-    void setCurrentPage(int page) { currentPage = page; }
+    ScreenPage getCurrentPage() const { return currentPage; }
+    void setCurrentPage(ScreenPage page) { currentPage = page; }
     bool isRocketSelected() const { return rocketSelected; }
     void setRocketSelected(bool selected) { rocketSelected = selected; }
     int getSelectedTransmitterIndex() const { return selectedTransmitterIndex; }
@@ -182,7 +193,7 @@ private:
     Preferences lastPositionsStorage; // For storing last known positions
     
     // Display page control
-    int currentPage = 4; // 0 = main data page, 1-3 = graph pages, 4 = transmitter selection page
+    ScreenPage currentPage = PAGE_TRANSMITTER_SELECTION;
     bool rocketSelected = false; // Flag to indicate if a rocket has been selected
     
     // Transmitter selection
