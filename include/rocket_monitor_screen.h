@@ -130,14 +130,19 @@ public:
     void setBuzzerActive(bool active) { buzzerActive = active; }
     bool isBuzzerActive() const { return buzzerActive; }
     
+    // Abort control
+    void setAbortSent(bool sent) { abortSent = sent; }
+    bool isAbortSent() const { return abortSent; }
+    
     // Packet statistics
     unsigned long lastPacketTime = 0;
     int packetCount = 0;
     int errorCount = 0;
     float lastSnr = 0.0f;
     
-    // Buzzer state
+    // Buzzer and abort states
     bool buzzerActive = false;
+    bool abortSent = false;
     
     // Data update methods for different packet types
     void updateGpsData(float lat, float lng);

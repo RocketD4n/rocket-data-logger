@@ -384,6 +384,24 @@ void processCommandPacket(uint8_t* buffer, size_t length) {
       controlBuzzer(packet->commandParam != 0);
       break;
       
+    case COMMAND_SUBTYPE_ABORT:
+      // Only process if parameter is 1 (safety check)
+      if (packet->commandParam == 1) {
+        Serial.println("EMERGENCY ABORT COMMAND RECEIVED!");
+        // Set LED to indicate abort status
+        setLedRed();
+        // Activate both relays to trigger parachute deployment
+        digitalWrite(PRIMARY_RELAY_PIN, HIGH);
+        digitalWrite(BACKUP_RELAY_PIN, HIGH);
+        relayActive = true;
+        // Activate buzzer for recovery
+        controlBuzzer(true);
+        Serial.println("Emergency parachute deployment activated");
+      } else {
+        Serial.println("Abort command received with invalid parameter");
+      }
+      break;
+      
     default:
       Serial.print("Unknown command subtype: ");
       Serial.println(packet->subType);

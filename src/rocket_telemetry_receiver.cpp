@@ -33,6 +33,7 @@ RocketMonitorScreen display(tft, ts);
 // Forward declarations of functions
 void sendSnrFeedback();
 void sendBuzzerCommand(uint32_t transmitterId, bool activate);
+void sendAbortCommand(uint32_t transmitterId);
 void processGpsPacket(uint8_t* buffer, size_t length);
 void processAltitudePacket(uint8_t* buffer, size_t length);
 void processSystemPacket(uint8_t* buffer, size_t length);
@@ -397,6 +398,33 @@ void sendBuzzerCommand(uint32_t transmitterId, bool activate) {
     display.setBuzzerActive(activate);
 }
 
+// Send emergency abort command to the rocket
+// This will trigger immediate parachute deployment
+void sendAbortCommand(uint32_t transmitterId) {
+    if (transmitterId == 0) return; // Don't send if no valid transmitter ID
+    
+    // Create command packet
+    CommandPacket packet;
+    packet.version = PROTOCOL_VERSION;
+    packet.packetType = PACKET_TYPE_COMMAND;
+    packet.subType = COMMAND_SUBTYPE_ABORT;
+    packet.transmitterId = transmitterId;
+    packet.commandParam = 1; // 1 = activate abort
+    packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
+    
+    // Send packet multiple times to ensure delivery
+    for (int i = 0; i < 3; i++) {
+        radio->transmit((uint8_t*)&packet, sizeof(packet));
+        delay(100); // Short delay between transmissions
+    }
+    
+    Serial.print("EMERGENCY ABORT COMMAND sent to transmitter 0x");
+    Serial.println(packet.transmitterId, HEX);
+    
+    // Update display to show abort status
+    display.setAbortSent(true);
+}
+
 // Display low battery shutdown message and shut down
 void lowBatteryShutdown() {
     // Display low battery warning using the RocketMonitorScreen class
@@ -416,12 +444,50 @@ void loop() {
     static unsigned long lastBuzzerCommandTime = 0;
     bool currentBuzzerState = display.isBuzzerActive();
     
+    // Track abort state for change detection and periodic resending
+    static bool lastAbortState = false;
+    static unsigned long lastAbortCommandTime = 0;
+    bool currentAbortState = display.isAbortSent();
+    
     // Check if buzzer state has changed (button was pressed)
     if (currentBuzzerState != lastBuzzerState && display.isRocketSelected()) {
         // Send buzzer command to the rocket
         sendBuzzerCommand(display.getSelectedTransmitterId(), currentBuzzerState);
         lastBuzzerState = currentBuzzerState;
         lastBuzzerCommandTime = millis();
+    }
+    
+    // Check if abort state has changed (abort was confirmed)
+    if (currentAbortState && !lastAbortState && display.isRocketSelected()) {
+        // Send abort command to the rocket
+        sendAbortCommand(display.getSelectedTransmitterId());
+        lastAbortState = currentAbortState;
+        lastAbortCommandTime = millis();
+        
+        // Log the abort event
+        Serial.print("EMERGENCY ABORT triggered for rocket: ");
+        Serial.println(display.getTransmitterName(display.getSelectedTransmitterId()));
+    }
+    
+    // Continuously resend the abort command if active (every 100ms)
+    // This ensures the command isn't lost due to packet loss
+    // Critical for emergency situations
+    if (currentAbortState && display.isRocketSelected() && 
+        millis() - lastAbortCommandTime >= 100) { // 100ms - much more frequent than buzzer
+        // Create and send abort command packet directly instead of calling sendAbortCommand
+        // to avoid the multiple transmissions within that function (we're already sending frequently)
+        CommandPacket packet;
+        packet.version = PROTOCOL_VERSION;
+        packet.packetType = PACKET_TYPE_COMMAND;
+        packet.subType = COMMAND_SUBTYPE_ABORT;
+        packet.transmitterId = display.getSelectedTransmitterId();
+        packet.commandParam = 1; // 1 = activate abort
+        packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
+        
+        // Send the packet once (we'll send again in 100ms)
+        radio->transmit((uint8_t*)&packet, sizeof(packet));
+        
+        lastAbortCommandTime = millis();
     }
     
     // Periodically resend the buzzer command if active (every 5 seconds)

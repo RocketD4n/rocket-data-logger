@@ -18,6 +18,7 @@
 
 // Command subtypes
 #define COMMAND_SUBTYPE_BUZZER 0x01
+#define COMMAND_SUBTYPE_ABORT 0x02  // Emergency parachute deployment
 
 // Launch state enum
 enum LaunchState {

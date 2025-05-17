@@ -418,6 +418,35 @@ The rocket includes a remotely activated buzzer to help locate it after landing:
    - Real-time power level displayed on receiver
    - Timestamped data
 
+## Emergency Abort System
+
+The system includes a remote emergency abort capability that allows the ground station operator to trigger parachute deployment in case of an emergency:
+
+1. **Abort Activation**
+   - Available only when the rocket is in flight (LAUNCH_STATE_LAUNCHED)
+   - Controlled via a prominent red button on the main data display page
+   - Features a two-step confirmation dialog to prevent accidental triggering
+   - Commands are continuously resent every 100ms for maximum reliability
+
+2. **Abort Mechanism**
+   - Immediately activates both primary and backup parachute deployment relays
+   - Forces the rocket state to LANDED to indicate flight termination
+   - Activates the recovery buzzer automatically
+   - Sets the LED to red to visually indicate abort status
+
+3. **Safety Features**
+   - Two-step confirmation dialog with clear visual warnings
+   - Command parameter validation on the rocket side
+   - Transmitter ID verification ensures commands only affect the selected rocket
+   - Multiple transmissions increase reliability in noisy environments
+   - Button is disabled after activation to prevent duplicate commands
+
+4. **Use Cases**
+   - Rocket flying off course or outside of designated area
+   - Visible structural issues during flight
+   - Sudden weather changes requiring mission termination
+   - Any situation requiring immediate and safe recovery of the rocket
+
 5. Deployment System
    - Primary relay activation
    - Backup relay system

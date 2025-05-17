@@ -333,6 +333,21 @@ void RocketMonitorScreen::drawMainPage() {
         tft.setTextDatum(TL_DATUM); // Back to top left
     }
     
+    // Draw abort button (if a rocket is selected and in flight)
+    if (rocketSelected && launchState == LAUNCH_STATE_LAUNCHED) {
+        // Draw button background - Red for emergency
+        uint16_t abortButtonColor = abortSent ? TFT_DARKGREY : TFT_RED;
+        tft.fillRoundRect(20, HEADER_HEIGHT + VALUE_HEIGHT * 6, 
+                         100, 40, 5, abortButtonColor);
+        
+        // Draw button text
+        tft.setTextColor(TFT_WHITE, abortButtonColor);
+        tft.setTextDatum(MC_DATUM); // Middle center
+        tft.drawString(abortSent ? "ABORT SENT" : "EMERGENCY ABORT", 
+                      70, HEADER_HEIGHT + VALUE_HEIGHT * 6 + 20, 2);
+        tft.setTextDatum(TL_DATUM); // Back to top left
+    }
+    
     // Update values
     updateMainPageValues();
 }
@@ -652,9 +667,42 @@ bool RocketMonitorScreen::handleTouch(int x, int y) {
         return true;
     }
     
-    // Handle page-specific touch events
+    // Private class member to track confirmation dialog state
+    static bool showingAbortConfirmation = false;
+
+// Handle page-specific touch events
     switch (currentPage) {
         case 0: // Main data page
+            // If showing abort confirmation dialog, handle that first
+            if (showingAbortConfirmation) {
+                // Check if YES button was pressed
+                if (isTouchInButton(x, y, tft.width()/2 - 100, tft.height()/2, 80, 40)) {
+                    // User confirmed abort - send the command
+                    abortSent = true;
+                    showingAbortConfirmation = false;
+                    
+                    // Redraw main page
+                    drawMainPage();
+                    
+                    // External function will need to be called to send the abort command
+                    // This will be handled in the main loop
+                    return true;
+                }
+                
+                // Check if NO button was pressed
+                if (isTouchInButton(x, y, tft.width()/2 + 20, tft.height()/2, 80, 40)) {
+                    // User canceled abort
+                    showingAbortConfirmation = false;
+                    
+                    // Redraw main page
+                    drawMainPage();
+                    return true;
+                }
+                
+                // Ignore other touches while confirmation dialog is showing
+                return true;
+            }
+            
             // Check for buzzer button (if a rocket is selected and either pre-launch or landed)
             if (rocketSelected && (launchState == LAUNCH_STATE_WAITING || launchState == LAUNCH_STATE_LANDED)) {
                 // Check if touch is within buzzer button area
@@ -675,6 +723,46 @@ bool RocketMonitorScreen::handleTouch(int x, int y) {
                     
                     // External function will need to be called to send the command
                     // This will be handled in the main loop
+                    return true;
+                }
+            }
+            
+            // Check for abort button (if a rocket is selected and in flight)
+            if (rocketSelected && launchState == LAUNCH_STATE_LAUNCHED && !abortSent) {
+                // Check if touch is within abort button area
+                if (isTouchInButton(x, y, 20, HEADER_HEIGHT + VALUE_HEIGHT * 6, 100, 40)) {
+                    // Show confirmation dialog
+                    showingAbortConfirmation = true;
+                    
+                    // Draw confirmation dialog
+                    tft.fillRoundRect(tft.width()/2 - 150, tft.height()/2 - 100, 300, 200, 10, TFT_DARKGREY);
+                    tft.fillRoundRect(tft.width()/2 - 145, tft.height()/2 - 95, 290, 190, 8, TFT_BLACK);
+                    
+                    // Dialog title
+                    tft.setTextColor(TFT_RED, TFT_BLACK);
+                    tft.setTextDatum(TC_DATUM); // Top center
+                    tft.drawString("CONFIRM EMERGENCY ABORT", tft.width()/2, tft.height()/2 - 80, 2);
+                    
+                    // Dialog message
+                    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+                    tft.setTextDatum(MC_DATUM); // Middle center
+                    tft.drawString("Are you sure you want to", tft.width()/2, tft.height()/2 - 40, 2);
+                    tft.drawString("trigger emergency parachute", tft.width()/2, tft.height()/2 - 20, 2);
+                    tft.drawString("deployment?", tft.width()/2, tft.height()/2, 2);
+                    
+                    // YES button (red)
+                    tft.fillRoundRect(tft.width()/2 - 100, tft.height()/2 + 30, 80, 40, 5, TFT_RED);
+                    tft.setTextColor(TFT_WHITE, TFT_RED);
+                    tft.drawString("YES", tft.width()/2 - 60, tft.height()/2 + 50, 2);
+                    
+                    // NO button (green)
+                    tft.fillRoundRect(tft.width()/2 + 20, tft.height()/2 + 30, 80, 40, 5, TFT_GREEN);
+                    tft.setTextColor(TFT_WHITE, TFT_GREEN);
+                    tft.drawString("NO", tft.width()/2 + 60, tft.height()/2 + 50, 2);
+                    
+                    // Reset text alignment
+                    tft.setTextDatum(TL_DATUM);
+                    
                     return true;
                 }
             }
