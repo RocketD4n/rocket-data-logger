@@ -126,11 +126,18 @@ public:
     void clearLastKnownPosition(uint32_t transmitterId);
     bool getLastKnownPosition(uint32_t transmitterId, float &lat, float &lng);
     
+    // Buzzer control
+    void setBuzzerActive(bool active) { buzzerActive = active; }
+    bool isBuzzerActive() const { return buzzerActive; }
+    
     // Packet statistics
     unsigned long lastPacketTime = 0;
     int packetCount = 0;
     int errorCount = 0;
     float lastSnr = 0.0f;
+    
+    // Buzzer state
+    bool buzzerActive = false;
     
     // Data update methods for different packet types
     void updateGpsData(float lat, float lng);

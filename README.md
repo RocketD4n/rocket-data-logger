@@ -11,6 +11,7 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 - **Touchscreen Interface**: Easy navigation between data pages and transmitter selection
 - **Power-saving Mode**: Automatically reduces transmission frequency when battery is low (<45%)
 - **SD Card Logging**: Automatically logs all telemetry data to CSV files on the receiver's SD card when installed
+- **Recovery Buzzer**: Remote-activated audio beacon to help locate the rocket after landing
 
 ## Hardware Requirements
 
@@ -232,6 +233,7 @@ Each log entry includes a timestamp from the receiver, allowing for accurate tim
 | MAX17043 SCL | D1 | 5 |
 | Primary Relay | D6 | 12 |
 | Backup Relay | D7 | 13 |
+| Buzzer | D10 | 1 |
 | LED | D4 | 2 |
 
 ### Telemetry Receiver (ESP32) Pins
@@ -372,7 +374,7 @@ Important notes for SX1278 maximum power operation:
 
 ## Adaptive Power Management
 
-The system features an adaptive power management system that dynamically adjusts the transmission power based on signal quality feedback:
+The system includes an adaptive power management system that optimizes transmission power based on signal quality feedback:
 
 1. **SNR Feedback Mechanism**
    - Receiver measures Signal-to-Noise Ratio (SNR) of incoming packets
@@ -387,6 +389,25 @@ The system features an adaptive power management system that dynamically adjusts
    - Power adjustments occur at most every 10 seconds
 
 3. **Radio-Specific Power Ranges**
+
+## Recovery Buzzer System
+
+The rocket includes a remotely activated buzzer to help locate it after landing:
+
+1. **Buzzer Activation**
+   - Available in both pre-launch and landed states
+   - Controlled via a button on the main data display page
+   - Commands are periodically resent every 5 seconds for reliability
+
+2. **Power-Efficient Operation**
+   - Buzzer beeps intermittently (100ms every 2 seconds) to conserve battery
+   - Uses GPIO1 (D10) which minimizes conflicts with other components
+   - Automatically deactivates when the receiver sends an OFF command
+
+3. **Command Protocol**
+   - Uses the command packet type with buzzer subtype
+   - Includes transmitter ID to ensure commands only affect the selected rocket
+   - Provides visual feedback on the receiver display (red when active, green when inactive)
    - SX1278 (LoRa): 2 dBm to 20 dBm
    - CC1101: -30 dBm to 10 dBm
 

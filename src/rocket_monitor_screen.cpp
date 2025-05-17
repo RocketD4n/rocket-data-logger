@@ -1,4 +1,5 @@
 #include "rocket_monitor_screen.h"
+#include "rocket_telemetry_protocol.h"
 
 // Constructor
 RocketMonitorScreen::RocketMonitorScreen(TFT_eSPI& tft, XPT2046_Touchscreen& ts)
@@ -317,6 +318,21 @@ void RocketMonitorScreen::drawMainPage() {
     // Stats row (full width)
     tft.drawString("Stats:", 20, HEADER_HEIGHT + VALUE_HEIGHT * 5);
     
+    // Draw buzzer button (if a rocket is selected and either pre-launch or landed)
+    if (rocketSelected && (launchState == LAUNCH_STATE_WAITING || launchState == LAUNCH_STATE_LANDED)) {
+        // Draw button background
+        uint16_t buttonColor = buzzerActive ? TFT_RED : TFT_GREEN;
+        tft.fillRoundRect(tft.width() - 100, HEADER_HEIGHT + VALUE_HEIGHT * 6, 
+                         80, 30, 5, buttonColor);
+        
+        // Draw button text
+        tft.setTextColor(TFT_WHITE, buttonColor);
+        tft.setTextDatum(MC_DATUM); // Middle center
+        tft.drawString(buzzerActive ? "BUZZER OFF" : "BUZZER ON", 
+                      tft.width() - 60, HEADER_HEIGHT + VALUE_HEIGHT * 6 + 15, 2);
+        tft.setTextDatum(TL_DATUM); // Back to top left
+    }
+    
     // Update values
     updateMainPageValues();
 }
@@ -347,10 +363,9 @@ void RocketMonitorScreen::updateMainPageValues() {
     // Update launch state
     String launchStateStr;
     switch (launchState) {
-        case 0: launchStateStr = "Waiting..."; break;
-        case 1: launchStateStr = "Launched"; break;
-        case 2: launchStateStr = "Apogee"; break;
-        case 3: launchStateStr = "Landed"; break;
+        case LAUNCH_STATE_WAITING: launchStateStr = "Waiting..."; break;
+        case LAUNCH_STATE_LAUNCHED: launchStateStr = "Launched"; break;
+        case LAUNCH_STATE_LANDED: launchStateStr = "Landed"; break;
         default: launchStateStr = "Unknown"; break;
     }
     tft.drawString(launchStateStr + "  ", RIGHT_COL + 60, HEADER_HEIGHT + VALUE_HEIGHT);
@@ -639,6 +654,32 @@ bool RocketMonitorScreen::handleTouch(int x, int y) {
     
     // Handle page-specific touch events
     switch (currentPage) {
+        case 0: // Main data page
+            // Check for buzzer button (if a rocket is selected and either pre-launch or landed)
+            if (rocketSelected && (launchState == LAUNCH_STATE_WAITING || launchState == LAUNCH_STATE_LANDED)) {
+                // Check if touch is within buzzer button area
+                if (isTouchInButton(x, y, tft.width() - 100, HEADER_HEIGHT + VALUE_HEIGHT * 6, 80, 30)) {
+                    // Toggle buzzer state
+                    buzzerActive = !buzzerActive;
+                    
+                    // Redraw button with new state
+                    uint16_t buttonColor = buzzerActive ? TFT_RED : TFT_GREEN;
+                    tft.fillRoundRect(tft.width() - 100, HEADER_HEIGHT + VALUE_HEIGHT * 6, 
+                                     80, 30, 5, buttonColor);
+                    
+                    tft.setTextColor(TFT_WHITE, buttonColor);
+                    tft.setTextDatum(MC_DATUM); // Middle center
+                    tft.drawString(buzzerActive ? "BUZZER OFF" : "BUZZER ON", 
+                                  tft.width() - 60, HEADER_HEIGHT + VALUE_HEIGHT * 6 + 15, 2);
+                    tft.setTextDatum(TL_DATUM); // Back to top left
+                    
+                    // External function will need to be called to send the command
+                    // This will be handled in the main loop
+                    return true;
+                }
+            }
+            break;
+            
         case 4: // Transmitter selection page
             // Check for transmitter selection
             for (int i = 0; i < numTransmitters; i++) {

@@ -10,10 +10,21 @@
 #define PACKET_TYPE_GPS 0x01
 #define PACKET_TYPE_ALTITUDE 0x02
 #define PACKET_TYPE_SYSTEM 0x03
+#define PACKET_TYPE_COMMAND 0xFE
 #define PACKET_TYPE_FEEDBACK 0xFF
 
 // Feedback subtypes
 #define FEEDBACK_SUBTYPE_SNR 0x01
+
+// Command subtypes
+#define COMMAND_SUBTYPE_BUZZER 0x01
+
+// Launch state enum
+enum LaunchState {
+    LAUNCH_STATE_WAITING = 0,  // Pre-launch, on the pad
+    LAUNCH_STATE_LAUNCHED = 1, // In flight
+    LAUNCH_STATE_LANDED = 2    // Flight complete, on the ground
+};
 
 inline uint8_t calculateChecksum(uint8_t* data, size_t length) {
     uint8_t checksum = 0;
@@ -66,5 +77,15 @@ struct SnrFeedbackPacket {
     uint8_t subType;      // 0x01 for SNR data
     uint32_t transmitterId; // Transmitter ID this feedback is for
     float snrValue;       // Current SNR value measured by receiver
+    uint8_t checksum;
+};
+
+// Command packet sent from receiver to logger
+struct CommandPacket {
+    uint8_t version;
+    uint8_t packetType;   // 0xFE for command packets
+    uint8_t subType;      // Command type (see command subtypes)
+    uint32_t transmitterId; // Transmitter ID this command is for
+    uint8_t commandParam; // Command parameter (1=on, 0=off for buzzer)
     uint8_t checksum;
 };

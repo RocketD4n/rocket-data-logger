@@ -1,6 +1,5 @@
 /*
  *  TODO:
- *  - receiver to send to rocket command to make sound
  *  - receiver to offer binding options
  *  - LVGL graphics on reciever screen
  */
@@ -36,6 +35,12 @@ unsigned long landedTime = 0;
 char line[256];
 float maxG = 0.0f;
 
+// Buzzer control variables
+bool buzzerActive = false;
+unsigned long lastBuzzerToggle = 0;
+const unsigned long BUZZER_CYCLE_INTERVAL = 2000; // 2 seconds between beeps
+const unsigned long BUZZER_BEEP_DURATION = 100;  // 100ms beep duration
+
 // Boot time tracking
 uint32_t bootTimeEpoch = 0; // Boot time in seconds since epoch (from GPS)
 
@@ -49,6 +54,11 @@ float txPower = 10.0f;                // Current transmission power in dBm
 #define LED_RED_PIN 0    // D3 on NodeMCU
 #define LED_GREEN_PIN 2  // D4 on NodeMCU (Built-in LED)
 #define LED_BLUE_PIN 13  // D7 on NodeMCU
+
+// Buzzer pin - Using D10 (GPIO1/TX pin)
+// Note: This will disable Serial output when buzzer is active, but that's acceptable
+// for a recovery beacon that only activates after landing
+#define BUZZER_PIN 1    // D10 (TX) on NodeMCU
 
 #define PRIMARY_RELAY_PIN 12 // D6 on NodeMCU
 
@@ -90,7 +100,9 @@ void sendGpsData();
 void sendSystemData();
 void sendAltitudeData();
 void processSnrFeedback(uint8_t* buffer, size_t length);
+void processCommandPacket(uint8_t* buffer, size_t length);
 void adjustTransmissionPower(float snr);
+void controlBuzzer(bool active);
 
 // Get the unique chip ID for this transmitter
 uint32_t transmitterId = 0;
@@ -120,6 +132,10 @@ void setup() {
   pinMode(LED_GREEN_PIN, OUTPUT);
   pinMode(LED_BLUE_PIN, OUTPUT);
   setLedYellow();  // Yellow during initialization
+  
+  // Initialize buzzer pin
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);  // Start with buzzer off
 
   // Initialize radio (CC1101)
   radio = new CC1101Radio(CC1101_CS, CC1101_GDO0, RADIOLIB_NC);
@@ -316,8 +332,7 @@ void sendSystemData() {
 }
 
 void sendAltitudeData() {
-  float altitude;
-  float temperature;
+  float altitude, temperature;
   getAltitudeAndTemp(altitude, temperature);
   
   if (altitude > maxAltitude) {
@@ -332,10 +347,64 @@ void sendAltitudeData() {
   packet.maxAltitude = maxAltitude;
   packet.temperature = temperature * 10; // Store with 0.1°C precision
   packet.maxG = maxG * 10; // Store with 0.1g precision
-  packet.launchState = launchDetected ? 1 : 0;
+  
+  // Set launch state using the enum values
+  if (landedDetected) {
+    packet.launchState = LAUNCH_STATE_LANDED;      // Landed
+  } else if (launchDetected) {
+    packet.launchState = LAUNCH_STATE_LAUNCHED;    // In flight
+  } else {
+    packet.launchState = LAUNCH_STATE_WAITING;    // Pre-launch
+  }
+  
   packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
   
   radio->transmit((uint8_t*)&packet, sizeof(packet));
+}
+
+// Process command packets from the receiver
+void processCommandPacket(uint8_t* buffer, size_t length) {
+  // Verify packet length and checksum
+  if (length < sizeof(CommandPacket)) return;
+  
+  // Cast buffer to command packet struct
+  CommandPacket* packet = (CommandPacket*)buffer;
+  
+  // Verify checksum
+  if (packet->checksum != calculateChecksum(buffer, length - 1)) return;
+  
+  // Verify this command is for this rocket
+  if (packet->transmitterId != transmitterId) return;
+  
+  // Process based on command subtype
+  switch (packet->subType) {
+    case COMMAND_SUBTYPE_BUZZER:
+      Serial.print("Buzzer command received: ");
+      Serial.println(packet->commandParam ? "ON" : "OFF");
+      controlBuzzer(packet->commandParam != 0);
+      break;
+      
+    default:
+      Serial.print("Unknown command subtype: ");
+      Serial.println(packet->subType);
+      break;
+  }
+}
+
+// Control the buzzer state
+void controlBuzzer(bool active) {
+  buzzerActive = active;
+  
+  if (!buzzerActive) {
+    // Turn off buzzer immediately when deactivated
+    digitalWrite(BUZZER_PIN, LOW);
+  } else {
+    // Reset toggle timer when activated
+    lastBuzzerToggle = millis();
+  }
+  
+  Serial.print("Buzzer ");
+  Serial.println(buzzerActive ? "activated" : "deactivated");
 }
 
 void loop() {
@@ -522,6 +591,28 @@ void loop() {
   if (landedDetected || micros() - lastFlush > 1000000) { 
     Textfile.flush();
     lastFlush = micros();
+  }
+  
+  // Handle buzzer control with power-efficient pattern if active
+  if (buzzerActive) {
+    unsigned long currentTime = millis();
+    unsigned long timeInCycle = currentTime % BUZZER_CYCLE_INTERVAL;
+    
+    // Turn buzzer on only for the beep duration at the start of each cycle
+    if (timeInCycle < BUZZER_BEEP_DURATION) {
+      // Buzzer should be on
+      if (digitalRead(BUZZER_PIN) == LOW) {
+        digitalWrite(BUZZER_PIN, HIGH);
+      }
+    } else {
+      // Buzzer should be off
+      if (digitalRead(BUZZER_PIN) == HIGH) {
+        digitalWrite(BUZZER_PIN, LOW);
+      }
+    }
+  } else {
+    // Make sure buzzer is off when not active
+    digitalWrite(BUZZER_PIN, LOW);
   }
   
   // Small delay to prevent CPU hogging

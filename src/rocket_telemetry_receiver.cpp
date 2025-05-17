@@ -32,6 +32,7 @@ RocketMonitorScreen display(tft, ts);
 
 // Forward declarations of functions
 void sendSnrFeedback();
+void sendBuzzerCommand(uint32_t transmitterId, bool activate);
 void processGpsPacket(uint8_t* buffer, size_t length);
 void processAltitudePacket(uint8_t* buffer, size_t length);
 void processSystemPacket(uint8_t* buffer, size_t length);
@@ -371,6 +372,31 @@ void sendSnrFeedback() {
     Serial.println(packet.snrValue);
 }
 
+// Send buzzer command to the rocket
+void sendBuzzerCommand(uint32_t transmitterId, bool activate) {
+    if (transmitterId == 0) return; // Don't send if no valid transmitter ID
+    
+    // Create command packet
+    CommandPacket packet;
+    packet.version = PROTOCOL_VERSION;
+    packet.packetType = PACKET_TYPE_COMMAND;
+    packet.subType = COMMAND_SUBTYPE_BUZZER;
+    packet.transmitterId = transmitterId;
+    packet.commandParam = activate ? 1 : 0; // 1 = activate, 0 = deactivate
+    packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
+    
+    // Send packet
+    radio->transmit((uint8_t*)&packet, sizeof(packet));
+    
+    Serial.print("Sent buzzer command to transmitter 0x");
+    Serial.print(packet.transmitterId, HEX);
+    Serial.print(": ");
+    Serial.println(activate ? "ON" : "OFF");
+    
+    // Update display state to show buzzer status
+    display.setBuzzerActive(activate);
+}
+
 // Display low battery shutdown message and shut down
 void lowBatteryShutdown() {
     // Display low battery warning using the RocketMonitorScreen class
@@ -385,6 +411,28 @@ void lowBatteryShutdown() {
 }
 
 void loop() {
+    // Track buzzer state for change detection and periodic resending
+    static bool lastBuzzerState = false;
+    static unsigned long lastBuzzerCommandTime = 0;
+    bool currentBuzzerState = display.isBuzzerActive();
+    
+    // Check if buzzer state has changed (button was pressed)
+    if (currentBuzzerState != lastBuzzerState && display.isRocketSelected()) {
+        // Send buzzer command to the rocket
+        sendBuzzerCommand(display.getSelectedTransmitterId(), currentBuzzerState);
+        lastBuzzerState = currentBuzzerState;
+        lastBuzzerCommandTime = millis();
+    }
+    
+    // Periodically resend the buzzer command if active (every 5 seconds)
+    // This ensures the command isn't lost due to packet loss
+    if (currentBuzzerState && display.isRocketSelected() && 
+        millis() - lastBuzzerCommandTime >= 5000) { // 5 seconds
+        sendBuzzerCommand(display.getSelectedTransmitterId(), true);
+        lastBuzzerCommandTime = millis();
+        Serial.println("Resending buzzer ON command");
+    }
+    
     // Read battery level
     static unsigned long lastBatteryCheck = 0;
     if (millis() - lastBatteryCheck >= 10000) { // Check every 10 seconds
