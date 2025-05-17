@@ -5,7 +5,6 @@
  *  - receiver to show battery level of itself
  *  - SD card logger in the receiver logging all the data received to various CSVs
  *  - LVGL graphics on reciever screen
- *  - receiver starts with search for rockets 
  *  - receiver allows for rockets to be named and stores the names to EEPROM
  */
  

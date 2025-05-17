@@ -35,6 +35,7 @@ void drawGraphPage();
 void updateGraph();
 void updateDisplay();
 void sendSnrFeedback();
+void drawTransmitterSelectionPage();
 
 // Display layout constants
 #define HEADER_HEIGHT 30
@@ -87,7 +88,8 @@ int selectedTransmitterIndex = -1; // -1 means no transmitter selected
 uint32_t selectedTransmitterId = 0;
 
 // Display page control
-int currentPage = 0; // 0 = main data page, 1-3 = graph pages, 4 = transmitter selection page
+int currentPage = 4; // 0 = main data page, 1-3 = graph pages, 4 = transmitter selection page
+bool rocketSelected = false; // Flag to indicate if a rocket has been selected
 const int NUM_PAGES = 5; // Main page + 3 graph pages + transmitter selection page
 
 // Graph data history
@@ -145,8 +147,8 @@ void setup() {
     ts.begin();
     ts.setRotation(3);
     
-    // Initialize the first page
-    drawMainPage();
+    // Initialize with the transmitter selection page
+    drawTransmitterSelectionPage();
 
     
     // Initialize radio
@@ -203,6 +205,11 @@ void drawBatteryIndicator() {
 
 // Draw navigation buttons
 void drawNavigationButtons() {
+    // Only show navigation buttons if a rocket has been selected
+    if (!rocketSelected) {
+        return;
+    }
+    
     // Left button (back)
     tft.fillRoundRect(NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, 
                      NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT, 5, NAV_BUTTON_COLOR);
@@ -423,40 +430,57 @@ void updateDisplay() {
     } else if (currentPage >= 1 && currentPage <= 3) {
         updateGraph();
     } else if (currentPage == 4) {
-        // Draw transmitter selection page
-        tft.fillScreen(TFT_BLACK);
-        drawBatteryIndicator();
-        tft.setTextColor(LABEL_COLOR, TFT_BLACK);
-        tft.drawString("Select Transmitter:", 10, 10);
+        drawTransmitterSelectionPage();
+    }
+}
+
+// Draw the transmitter selection page (page 4)
+void drawTransmitterSelectionPage() {
+    tft.fillScreen(TFT_BLACK);
+    drawBatteryIndicator();
+    if (rocketSelected) {
+        drawNavigationButtons();
+    }
+    
+    tft.setTextColor(LABEL_COLOR, TFT_BLACK);
+    tft.drawString("Select Transmitter:", 10, 10);
+    
+    // If no transmitters found yet, show searching message
+    if (numTransmitters == 0) {
+        tft.setTextColor(TFT_WHITE, TFT_BLACK);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString("Searching for rockets...", tft.width()/2, tft.height()/2, 2);
+        tft.setTextDatum(TL_DATUM);
+        return;
+    }
+    
+    // Draw list of known transmitters with uptime
+    for (int i = 0; i < numTransmitters; i++) {
+        String idStr = "ID: 0x" + String(knownTransmitters[i], HEX);
+        tft.drawString(idStr, 10, 40 + i * 30);
         
-        // Draw list of known transmitters with uptime
-        for (int i = 0; i < numTransmitters; i++) {
-            String idStr = "ID: 0x" + String(knownTransmitters[i], HEX);
-            tft.drawString(idStr, 10, 40 + i * 30);
+        // If this is the selected transmitter, show uptime
+        if (knownTransmitters[i] == selectedTransmitterId) {
+            // Format uptime nicely (hours:minutes:seconds)
+            unsigned long uptimeSec = rocketUptime / 1000;
+            unsigned long hours = uptimeSec / 3600;
+            unsigned long minutes = (uptimeSec % 3600) / 60;
+            unsigned long seconds = uptimeSec % 60;
             
-            // If this is the selected transmitter, show uptime
-            if (knownTransmitters[i] == selectedTransmitterId) {
-                // Format uptime nicely (hours:minutes:seconds)
-                unsigned long uptimeSec = rocketUptime / 1000;
-                unsigned long hours = uptimeSec / 3600;
-                unsigned long minutes = (uptimeSec % 3600) / 60;
-                unsigned long seconds = uptimeSec % 60;
-                
-                String uptimeStr = "Uptime: " + String(hours) + ":" + 
-                                  (minutes < 10 ? "0" : "") + String(minutes) + ":" + 
-                                  (seconds < 10 ? "0" : "") + String(seconds);
-                                  
-                tft.drawString(uptimeStr, 160, 40 + i * 30);
-            }
+            String uptimeStr = "Uptime: " + String(hours) + ":" + 
+                               (minutes < 10 ? "0" : "") + String(minutes) + ":" + 
+                               (seconds < 10 ? "0" : "") + String(seconds);
+                               
+            tft.drawString(uptimeStr, 160, 40 + i * 30);
         }
-        
-        // Highlight selected transmitter
-        if (selectedTransmitterIndex != -1) {
-            tft.setTextColor(VALUE_COLOR, TFT_BLACK);
-            tft.drawString("ID: 0x" + String(knownTransmitters[selectedTransmitterIndex], HEX), 
-                          10, 40 + selectedTransmitterIndex * 30);
-            tft.drawRect(5, 35 + selectedTransmitterIndex * 30, 310, 25, VALUE_COLOR);
-        }
+    }
+    
+    // Highlight selected transmitter
+    if (selectedTransmitterIndex != -1) {
+        tft.setTextColor(VALUE_COLOR, TFT_BLACK);
+        tft.drawString("ID: 0x" + String(knownTransmitters[selectedTransmitterIndex], HEX), 
+                       10, 40 + selectedTransmitterIndex * 30);
+        tft.drawRect(5, 35 + selectedTransmitterIndex * 30, 310, 25, VALUE_COLOR);
     }
 }
 
@@ -478,8 +502,8 @@ void handleTouch() {
     uint16_t x = map(p.x, 0, 4095, 0, tft.width());
     uint16_t y = map(p.y, 0, 4095, 0, tft.height());
     
-    // Check if left navigation button was pressed
-    if (isTouchInButton(x, y, NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
+    // Check if left navigation button was pressed (only if a rocket is selected)
+    if (rocketSelected && isTouchInButton(x, y, NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
         // Go to previous page
         currentPage--;
         if (currentPage < 0) currentPage = NUM_PAGES - 1; // Wrap around to last page
@@ -494,8 +518,8 @@ void handleTouch() {
         }
     }
     
-    // Check if right navigation button was pressed
-    if (isTouchInButton(x, y, tft.width() - NAV_BUTTON_WIDTH - NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
+    // Check if right navigation button was pressed (only if a rocket is selected)
+    if (rocketSelected && isTouchInButton(x, y, tft.width() - NAV_BUTTON_WIDTH - NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
         // Go to next page
         currentPage++;
         if (currentPage >= NUM_PAGES) currentPage = 0; // Wrap around to first page
@@ -512,13 +536,22 @@ void handleTouch() {
     
     // Check if transmitter selection page is active
     if (currentPage == 4) {
-        // Check if a transmitter was selected
-        for (int i = 0; i < numTransmitters; i++) {
-            if (isTouchInButton(x, y, 5, 35 + i * 30, 310, 25)) {
-                selectedTransmitterIndex = i;
-                selectedTransmitterId = knownTransmitters[i];
+        // Check if a transmitter was selected on the transmitter selection page
+        if (currentPage == 4 && y >= 35 && y < 35 + numTransmitters * 30) {
+            int index = (y - 35) / 30;
+            if (index >= 0 && index < numTransmitters) {
+                selectedTransmitterIndex = index;
+                selectedTransmitterId = knownTransmitters[index];
+                
+                // Set the flag that a rocket has been selected
+                if (!rocketSelected) {
+                    rocketSelected = true;
+                    // Switch to main data page after selection
+                    currentPage = 0;
+                }
+                
                 updateDisplay();
-                break;
+                delay(200); // Debounce
             }
         }
     }
@@ -545,28 +578,33 @@ void processGpsPacket(uint8_t* buffer, size_t length) {
   }
   
   // Check if this is a new transmitter
-  bool transmitterKnown = false;
+  bool isNewTransmitter = true;
   for (int i = 0; i < numTransmitters; i++) {
     if (knownTransmitters[i] == packet->transmitterId) {
-      transmitterKnown = true;
+      isNewTransmitter = false;
       break;
     }
   }
   
-  // If it's a new transmitter, add it to the list
-  if (!transmitterKnown && numTransmitters < MAX_TRANSMITTERS) {
+  // Add to known transmitters if new
+  if (isNewTransmitter && numTransmitters < MAX_TRANSMITTERS) {
     knownTransmitters[numTransmitters] = packet->transmitterId;
     numTransmitters++;
     
-    // If no transmitter is selected yet, select this one
-    if (selectedTransmitterIndex == -1) {
-      selectedTransmitterIndex = numTransmitters - 1;
+    // If this is the first transmitter, select it automatically
+    if (numTransmitters == 1) {
+      selectedTransmitterIndex = 0;
       selectedTransmitterId = packet->transmitterId;
+      rocketSelected = true;
+      
+      // Switch to main data page after first rocket is found
+      currentPage = 0;
+      updateDisplay();
     }
   }
   
-  // If this packet is not from the selected transmitter, ignore it
-  if (selectedTransmitterIndex != -1 && packet->transmitterId != selectedTransmitterId) {
+  // Only process packet if it's from the selected transmitter
+  if (packet->transmitterId != selectedTransmitterId) {
     return;
   }
   
