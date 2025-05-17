@@ -4,7 +4,6 @@
 #include <XPT2046_Touchscreen.h>
 #include <Wire.h>
 #include <MAX1704X.h>
-#include <Preferences.h>
 #include "rocket_telemetry_protocol.h"
 #include "cc1101_radio.h"
 #include "rocket_monitor_screen.h"
@@ -14,7 +13,6 @@
 #define CC1101_GDO0 4  // GPIO4
 // Radio instance using CC1101
 Radio* radio = new CC1101Radio(CC1101_CS, CC1101_GDO0, RADIOLIB_NC);
-
 
 // Battery monitor configuration
 #define MAX17043_SDA 32
@@ -36,11 +34,6 @@ void processGpsPacket(uint8_t* buffer, size_t length);
 void processAltitudePacket(uint8_t* buffer, size_t length);
 void processSystemPacket(uint8_t* buffer, size_t length);
 void lowBatteryShutdown();
-
-unsigned long lastPacketTime = 0;
-unsigned long packetCount = 0;
-unsigned long errorCount = 0;
-float lastSnr = 0.0f;
 
 // Transmitter selection
 #define MAX_TRANSMITTERS 10
@@ -70,83 +63,9 @@ const char keyboardChars[4][10] = {
 #define KEYBOARD_X 10
 #define KEYBOARD_Y 100
 
-// Packet statistics
-uint32_t totalPackets = 0;
-uint32_t badPackets = 0;
-uint32_t badChecksums = 0;
-
 // SNR feedback control
 unsigned long lastSnrFeedbackTime = 0;
 const unsigned long SNR_FEEDBACK_INTERVAL = 1000; // Send SNR feedback every 1 second
-
-// Load rocket names from preferences storage
-void loadRocketNames() {
-    preferences.begin("rockets", false); // false = read/write mode
-    
-    // Load saved rocket names
-    for (int i = 0; i < MAX_TRANSMITTERS; i++) {
-        String key = String(i);
-        String name = preferences.getString(key.c_str(), "");
-        
-        // Check if we have a transmitter ID saved for this slot
-        String idKey = "id" + key;
-        uint32_t savedId = preferences.getUInt(idKey.c_str(), 0);
-        
-        if (savedId != 0) {
-            // Find if this ID is already in our known transmitters list
-            bool found = false;
-            for (int j = 0; j < numTransmitters; j++) {
-                if (knownTransmitters[j] == savedId) {
-                    rocketNames[j] = name;
-                    found = true;
-                    break;
-                }
-            }
-            
-            // If not found and we have space, add it
-            if (!found && numTransmitters < MAX_TRANSMITTERS) {
-                knownTransmitters[numTransmitters] = savedId;
-                rocketNames[numTransmitters] = name;
-                numTransmitters++;
-            }
-        }
-    }
-    
-    preferences.end();
-}
-
-// Save rocket name to preferences storage
-void saveRocketName() {
-    if (editingTransmitterIndex < 0 || editingTransmitterIndex >= numTransmitters) {
-        return;
-    }
-    
-    // Trim and limit name length
-    currentInput.trim();
-    if (currentInput.length() > MAX_NAME_LENGTH) {
-        currentInput = currentInput.substring(0, MAX_NAME_LENGTH);
-    }
-    
-    // Save the name
-    rocketNames[editingTransmitterIndex] = currentInput;
-    
-    // Save to preferences
-    preferences.begin("rockets", false);
-    String key = String(editingTransmitterIndex);
-    preferences.putString(key.c_str(), currentInput);
-    
-    // Also save the transmitter ID
-    String idKey = "id" + key;
-    preferences.putUInt(idKey.c_str(), knownTransmitters[editingTransmitterIndex]);
-    
-    preferences.end();
-    
-    // Reset editing state
-    editingName = false;
-    showKeyboard = false;
-    currentInput = "";
-    editingTransmitterIndex = -1;
-}
 
 void setup() {
     Serial.begin(115200);
@@ -185,26 +104,6 @@ void setup() {
         while (true);
     }
     Serial.println(F("Radio configured successfully!"));
-}
-
-// Handle touch events
-void handleTouch() {
-    if (!ts.touched()) {
-        return;
-    }
-    
-    // Get touch coordinates
-    TS_Point p = ts.getPoint();
-    
-    // Convert touch coordinates to screen coordinates
-    uint16_t x = map(p.x, 0, 4095, 0, tft.width());
-    uint16_t y = map(p.y, 0, 4095, 0, tft.height());
-    
-    // Pass touch events to the RocketMonitorScreen class
-    display.handleTouch(x, y);
-    
-    // Add a small delay for debouncing
-    delay(50);
 }
 
 // Process GPS packet
