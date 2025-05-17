@@ -4,6 +4,7 @@
 #include <XPT2046_Touchscreen.h>
 #include <Wire.h>
 #include <MAX1704X.h>
+#include <Preferences.h>
 #include "rocket_telemetry_protocol.h"
 #include "cc1101_radio.h"
 
@@ -36,6 +37,10 @@ void updateGraph();
 void updateDisplay();
 void sendSnrFeedback();
 void drawTransmitterSelectionPage();
+void drawKeyboard();
+void processKeyPress(char key);
+void saveRocketName();
+void loadRocketNames();
 
 // Display layout constants
 #define HEADER_HEIGHT 30
@@ -82,10 +87,31 @@ float lastSnr = 0.0f;
 
 // Transmitter selection
 #define MAX_TRANSMITTERS 10
+#define MAX_NAME_LENGTH 16
 uint32_t knownTransmitters[MAX_TRANSMITTERS] = {0};
+String rocketNames[MAX_TRANSMITTERS];
 int numTransmitters = 0;
 int selectedTransmitterIndex = -1; // -1 means no transmitter selected
 uint32_t selectedTransmitterId = 0;
+
+// Preferences for storing rocket names
+Preferences preferences;
+
+// Keyboard variables
+bool showKeyboard = false;
+bool editingName = false;
+int editingTransmitterIndex = -1;
+String currentInput = "";
+const char keyboardChars[4][10] = {
+    {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'},
+    {'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'},
+    {'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ' '},
+    {'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', ' ', '>'}
+};
+#define KEY_WIDTH 30
+#define KEY_HEIGHT 30
+#define KEYBOARD_X 10
+#define KEYBOARD_Y 100
 
 // Display page control
 int currentPage = 4; // 0 = main data page, 1-3 = graph pages, 4 = transmitter selection page
@@ -118,8 +144,84 @@ uint32_t badChecksums = 0;
 unsigned long lastSnrFeedbackTime = 0;
 const unsigned long SNR_FEEDBACK_INTERVAL = 1000; // Send SNR feedback every 1 second
 
+// Load rocket names from preferences storage
+void loadRocketNames() {
+    preferences.begin("rockets", false); // false = read/write mode
+    
+    // Load saved rocket names
+    for (int i = 0; i < MAX_TRANSMITTERS; i++) {
+        String key = String(i);
+        String name = preferences.getString(key.c_str(), "");
+        
+        // Check if we have a transmitter ID saved for this slot
+        String idKey = "id" + key;
+        uint32_t savedId = preferences.getUInt(idKey.c_str(), 0);
+        
+        if (savedId != 0) {
+            // Find if this ID is already in our known transmitters list
+            bool found = false;
+            for (int j = 0; j < numTransmitters; j++) {
+                if (knownTransmitters[j] == savedId) {
+                    rocketNames[j] = name;
+                    found = true;
+                    break;
+                }
+            }
+            
+            // If not found and we have space, add it
+            if (!found && numTransmitters < MAX_TRANSMITTERS) {
+                knownTransmitters[numTransmitters] = savedId;
+                rocketNames[numTransmitters] = name;
+                numTransmitters++;
+            }
+        }
+    }
+    
+    preferences.end();
+}
+
+// Save rocket name to preferences storage
+void saveRocketName() {
+    if (editingTransmitterIndex < 0 || editingTransmitterIndex >= numTransmitters) {
+        return;
+    }
+    
+    // Trim and limit name length
+    currentInput.trim();
+    if (currentInput.length() > MAX_NAME_LENGTH) {
+        currentInput = currentInput.substring(0, MAX_NAME_LENGTH);
+    }
+    
+    // Save the name
+    rocketNames[editingTransmitterIndex] = currentInput;
+    
+    // Save to preferences
+    preferences.begin("rockets", false);
+    String key = String(editingTransmitterIndex);
+    preferences.putString(key.c_str(), currentInput);
+    
+    // Also save the transmitter ID
+    String idKey = "id" + key;
+    preferences.putUInt(idKey.c_str(), knownTransmitters[editingTransmitterIndex]);
+    
+    preferences.end();
+    
+    // Reset editing state
+    editingName = false;
+    showKeyboard = false;
+    currentInput = "";
+    editingTransmitterIndex = -1;
+}
+
 void setup() {
     Serial.begin(115200);
+    
+    // Initialize preferences
+    preferences.begin("rockets", false);
+    preferences.end();
+    
+    // Load saved rocket names
+    loadRocketNames();
     
     // Initialize I2C for battery monitor
     Wire.begin(MAX17043_SDA, MAX17043_SCL);
@@ -434,6 +536,106 @@ void updateDisplay() {
     }
 }
 
+// Draw the on-screen keyboard
+void drawKeyboard() {
+    // Draw keyboard background
+    tft.fillRect(0, 95, tft.width(), tft.height() - 95, TFT_DARKGREY);
+    
+    // Draw current input field
+    tft.fillRect(10, 100, tft.width() - 20, 30, TFT_BLACK);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString(currentInput + "_", 15, 105, 2);
+    
+    // Draw keyboard keys
+    for (int row = 0; row < 4; row++) {
+        for (int col = 0; col < 10; col++) {
+            int x = KEYBOARD_X + col * (KEY_WIDTH + 2);
+            int y = KEYBOARD_Y + 40 + row * (KEY_HEIGHT + 2);
+            
+            // Special handling for function keys
+            if (row == 3 && col == 7) { // Backspace key
+                tft.fillRect(x, y, KEY_WIDTH, KEY_HEIGHT, TFT_BLUE);
+                tft.setTextColor(TFT_WHITE);
+                tft.setTextDatum(MC_DATUM);
+                tft.drawString("<", x + KEY_WIDTH/2, y + KEY_HEIGHT/2, 2);
+            } 
+            else if (row == 3 && col == 9) { // Enter/Done key
+                tft.fillRect(x, y, KEY_WIDTH, KEY_HEIGHT, TFT_GREEN);
+                tft.setTextColor(TFT_BLACK);
+                tft.setTextDatum(MC_DATUM);
+                tft.drawString(">", x + KEY_WIDTH/2, y + KEY_HEIGHT/2, 2);
+            }
+            else if (row == 3 && col == 8) { // Space key
+                tft.fillRect(x, y, KEY_WIDTH, KEY_HEIGHT, TFT_LIGHTGREY);
+                tft.setTextColor(TFT_BLACK);
+                tft.setTextDatum(MC_DATUM);
+                tft.drawString("_", x + KEY_WIDTH/2, y + KEY_HEIGHT/2, 2);
+            }
+            else {
+                tft.fillRect(x, y, KEY_WIDTH, KEY_HEIGHT, TFT_LIGHTGREY);
+                tft.setTextColor(TFT_BLACK);
+                tft.setTextDatum(MC_DATUM);
+                tft.drawString(String(keyboardChars[row][col]), x + KEY_WIDTH/2, y + KEY_HEIGHT/2, 2);
+            }
+        }
+    }
+    
+    // Draw cancel button
+    tft.fillRect(10, tft.height() - 40, 100, 30, TFT_RED);
+    tft.setTextColor(TFT_WHITE);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("CANCEL", 60, tft.height() - 25, 2);
+    
+    // Reset text alignment
+    tft.setTextDatum(TL_DATUM);
+}
+
+// Process key press on the on-screen keyboard
+void processKeyPress(int x, int y) {
+    // Check if cancel button was pressed
+    if (y >= tft.height() - 40 && y <= tft.height() - 10 && x >= 10 && x <= 110) {
+        // Cancel editing
+        editingName = false;
+        showKeyboard = false;
+        currentInput = "";
+        editingTransmitterIndex = -1;
+        drawTransmitterSelectionPage();
+        return;
+    }
+    
+    // Check if a key was pressed
+    if (y >= KEYBOARD_Y + 40 && y < KEYBOARD_Y + 40 + 4 * (KEY_HEIGHT + 2)) {
+        int row = (y - (KEYBOARD_Y + 40)) / (KEY_HEIGHT + 2);
+        int col = (x - KEYBOARD_X) / (KEY_WIDTH + 2);
+        
+        if (row >= 0 && row < 4 && col >= 0 && col < 10) {
+            // Handle special keys
+            if (row == 3 && col == 7) { // Backspace
+                if (currentInput.length() > 0) {
+                    currentInput = currentInput.substring(0, currentInput.length() - 1);
+                }
+            }
+            else if (row == 3 && col == 9) { // Done/Enter
+                saveRocketName();
+                drawTransmitterSelectionPage();
+                return;
+            }
+            else if (row == 3 && col == 8) { // Space
+                currentInput += " ";
+            }
+            else { // Regular character
+                if (currentInput.length() < MAX_NAME_LENGTH) {
+                    currentInput += keyboardChars[row][col];
+                }
+            }
+            
+            // Redraw keyboard with updated input
+            drawKeyboard();
+        }
+    }
+}
+
 // Draw the transmitter selection page (page 4)
 void drawTransmitterSelectionPage() {
     tft.fillScreen(TFT_BLACK);
@@ -454,10 +656,31 @@ void drawTransmitterSelectionPage() {
         return;
     }
     
-    // Draw list of known transmitters with uptime
+    // If keyboard is shown, draw it and return
+    if (showKeyboard && editingName) {
+        drawKeyboard();
+        return;
+    }
+    
+    // Draw list of known transmitters with names and uptime
     for (int i = 0; i < numTransmitters; i++) {
-        String idStr = "ID: 0x" + String(knownTransmitters[i], HEX);
-        tft.drawString(idStr, 10, 40 + i * 30);
+        // Show either name (if available) or ID
+        String displayText;
+        if (rocketNames[i].length() > 0) {
+            displayText = rocketNames[i];
+        } else {
+            displayText = "ID: 0x" + String(knownTransmitters[i], HEX);
+        }
+        
+        tft.setTextColor(TFT_WHITE, TFT_BLACK);
+        tft.drawString(displayText, 10, 40 + i * 30);
+        
+        // Draw edit button
+        tft.fillRect(tft.width() - 60, 40 + i * 30, 50, 20, TFT_BLUE);
+        tft.setTextColor(TFT_WHITE);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString("NAME", tft.width() - 35, 40 + i * 30 + 10, 1);
+        tft.setTextDatum(TL_DATUM);
         
         // If this is the selected transmitter, show uptime
         if (knownTransmitters[i] == selectedTransmitterId) {
@@ -478,9 +701,14 @@ void drawTransmitterSelectionPage() {
     // Highlight selected transmitter
     if (selectedTransmitterIndex != -1) {
         tft.setTextColor(VALUE_COLOR, TFT_BLACK);
-        tft.drawString("ID: 0x" + String(knownTransmitters[selectedTransmitterIndex], HEX), 
-                       10, 40 + selectedTransmitterIndex * 30);
-        tft.drawRect(5, 35 + selectedTransmitterIndex * 30, 310, 25, VALUE_COLOR);
+        String displayText;
+        if (rocketNames[selectedTransmitterIndex].length() > 0) {
+            displayText = rocketNames[selectedTransmitterIndex];
+        } else {
+            displayText = "ID: 0x" + String(knownTransmitters[selectedTransmitterIndex], HEX);
+        }
+        tft.drawString(displayText, 10, 40 + selectedTransmitterIndex * 30);
+        tft.drawRect(5, 35 + selectedTransmitterIndex * 30, tft.width() - 70, 25, VALUE_COLOR);
     }
 }
 
@@ -536,8 +764,30 @@ void handleTouch() {
     
     // Check if transmitter selection page is active
     if (currentPage == 4) {
+        // If keyboard is active, handle keyboard touches
+        if (showKeyboard && editingName) {
+            processKeyPress(x, y);
+            delay(200); // Debounce
+            return;
+        }
+        
+        // Check if an edit button was pressed
+        for (int i = 0; i < numTransmitters; i++) {
+            if (x >= tft.width() - 60 && x <= tft.width() - 10 && 
+                y >= 40 + i * 30 && y <= 60 + i * 30) {
+                // Edit button pressed for transmitter i
+                editingTransmitterIndex = i;
+                editingName = true;
+                showKeyboard = true;
+                currentInput = rocketNames[i]; // Start with current name if any
+                drawTransmitterSelectionPage(); // Will show keyboard
+                delay(200); // Debounce
+                return;
+            }
+        }
+        
         // Check if a transmitter was selected on the transmitter selection page
-        if (currentPage == 4 && y >= 35 && y < 35 + numTransmitters * 30) {
+        if (y >= 35 && y < 35 + numTransmitters * 30 && x < tft.width() - 65) {
             int index = (y - 35) / 30;
             if (index >= 0 && index < numTransmitters) {
                 selectedTransmitterIndex = index;
