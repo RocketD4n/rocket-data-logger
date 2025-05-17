@@ -36,9 +36,13 @@ void RocketMonitorScreen::begin() {
     ts.begin();
     ts.setRotation(3);
     
-    // Initialize preferences
-    preferences.begin("rockets", false);
-    preferences.end();
+    // Initialize rocket names storage
+    rocketNamesStorage.begin("rockets", false);
+    rocketNamesStorage.end();
+    
+    // Initialize last positions storage
+    lastPositionsStorage.begin("lastpos", false);
+    lastPositionsStorage.end();
     
     // Load saved rocket names
     loadRocketNames();
@@ -53,18 +57,18 @@ void RocketMonitorScreen::sleepDisplay() {
     tft.writecommand(0x10); // SLPIN command
 }
 
-// Load rocket names from preferences storage
+// Load rocket names from storage
 void RocketMonitorScreen::loadRocketNames() {
-    preferences.begin("rockets", false); // false = read/write mode
+    rocketNamesStorage.begin("rockets", false); // false = read/write mode
     
     // Load saved rocket names
     for (int i = 0; i < MAX_TRANSMITTERS; i++) {
         String key = String(i);
-        String name = preferences.getString(key.c_str(), "");
+        String name = rocketNamesStorage.getString(key.c_str(), "");
         
         // Check if we have a transmitter ID saved for this slot
         String idKey = "id" + key;
-        uint32_t savedId = preferences.getUInt(idKey.c_str(), 0);
+        uint32_t savedId = rocketNamesStorage.getUInt(idKey.c_str(), 0);
         
         if (savedId != 0) {
             // Find if this ID is already in our known transmitters list
@@ -86,10 +90,10 @@ void RocketMonitorScreen::loadRocketNames() {
         }
     }
     
-    preferences.end();
+    rocketNamesStorage.end();
 }
 
-// Save rocket name to preferences storage
+// Save rocket name to storage
 void RocketMonitorScreen::saveRocketName() {
     if (editingTransmitterIndex < 0 || editingTransmitterIndex >= numTransmitters) {
         return;
@@ -104,16 +108,16 @@ void RocketMonitorScreen::saveRocketName() {
     // Save the name
     rocketNames[editingTransmitterIndex] = currentInput;
     
-    // Save to preferences
-    preferences.begin("rockets", false);
+    // Save to storage
+    rocketNamesStorage.begin("rockets", false);
     String key = String(editingTransmitterIndex);
-    preferences.putString(key.c_str(), currentInput);
+    rocketNamesStorage.putString(key.c_str(), currentInput);
     
     // Also save the transmitter ID
     String idKey = "id" + key;
-    preferences.putUInt(idKey.c_str(), knownTransmitters[editingTransmitterIndex]);
+    rocketNamesStorage.putUInt(idKey.c_str(), knownTransmitters[editingTransmitterIndex]);
     
-    preferences.end();
+    rocketNamesStorage.end();
     
     // Reset editing state
     editingName = false;
@@ -160,6 +164,11 @@ void RocketMonitorScreen::addTransmitter(uint32_t transmitterId) {
 void RocketMonitorScreen::updateGpsData(float lat, float lng) {
     currentLat = lat;
     currentLng = lng;
+    
+    // Save last known position if we have a valid GPS fix
+    if (lat != 0.0f && lng != 0.0f && selectedTransmitterId != 0) {
+        saveLastKnownPosition(selectedTransmitterId, lat, lng);
+    }
     
     // Update last packet time
     lastPacketTime = millis();
@@ -612,65 +621,64 @@ bool RocketMonitorScreen::handleTouch(int x, int y) {
         return true;
     }
     
-    // Handle navigation buttons if a rocket is selected
-    if (rocketSelected) {
-        // Left button (back)
-        if (isTouchInButton(x, y, NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
-            currentPage = (currentPage - 1 + NUM_PAGES) % NUM_PAGES;
-            if (currentPage == 0) {
-                drawMainPage();
-            } else if (currentPage >= 1 && currentPage <= 3) {
-                drawGraphPage();
-            } else {
-                drawTransmitterSelectionPage();
-            }
-            return true;
-        }
-        
-        // Right button (forward)
-        if (isTouchInButton(x, y, tft.width() - NAV_BUTTON_MARGIN - NAV_BUTTON_WIDTH, 
-                           NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
-            currentPage = (currentPage + 1) % NUM_PAGES;
-            if (currentPage == 0) {
-                drawMainPage();
-            } else if (currentPage >= 1 && currentPage <= 3) {
-                drawGraphPage();
-            } else {
-                drawTransmitterSelectionPage();
-            }
-            return true;
-        }
+    // Check for left navigation button
+    if (isTouchInButton(x, y, NAV_BUTTON_MARGIN, NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
+        // Go to previous page
+        currentPage = (currentPage - 1 + NUM_PAGES) % NUM_PAGES;
+        updateDisplay();
+        return true;
     }
     
-    // Handle transmitter selection
-    if (currentPage == 4 && numTransmitters > 0) {
-        const int startY = 60;
-        const int itemHeight = 30;
-        const int nameButtonWidth = 50;
-        
-        // Check if a transmitter was selected
-        for (int i = 0; i < numTransmitters; i++) {
-            if (y >= startY + i * itemHeight - 5 && y <= startY + i * itemHeight + 25) {
-                // Check if NAME button was pressed
-                if (x >= tft.width() - nameButtonWidth - 10 && x <= tft.width() - 10) {
-                    // Start editing name
-                    editingName = true;
-                    showKeyboard = true;
-                    editingTransmitterIndex = i;
-                    currentInput = rocketNames[i];
-                    drawTransmitterSelectionPage(); // Redraw with keyboard
-                    return true;
-                } 
-                // Otherwise select this transmitter
-                else if (x >= 20 && x <= tft.width() - nameButtonWidth - 15) {
+    // Check for right navigation button
+    if (isTouchInButton(x, y, tft.width() - NAV_BUTTON_MARGIN - NAV_BUTTON_WIDTH, NAV_BUTTON_MARGIN, NAV_BUTTON_WIDTH, NAV_BUTTON_HEIGHT)) {
+        // Go to next page
+        currentPage = (currentPage + 1) % NUM_PAGES;
+        updateDisplay();
+        return true;
+    }
+    
+    // Handle page-specific touch events
+    switch (currentPage) {
+        case 4: // Transmitter selection page
+            // Check for transmitter selection
+            for (int i = 0; i < numTransmitters; i++) {
+                int yPos = 50 + i * 40;
+                if (y >= yPos && y < yPos + 30 && x >= 10 && x < tft.width() - 10) {
+                    // Select this transmitter
                     selectedTransmitterIndex = i;
                     selectedTransmitterId = knownTransmitters[i];
                     rocketSelected = true;
-                    drawTransmitterSelectionPage(); // Redraw with selection
+                    
+                    // Switch to main data page
+                    currentPage = 0;
+                    updateDisplay();
                     return true;
                 }
             }
-        }
+            break;
+            
+        case 5: // Last known positions page
+            // Check for clear buttons
+            int yPos = 50;
+            for (int i = 0; i < numTransmitters; i++) {
+                uint32_t id = knownTransmitters[i];
+                if (id == 0) continue;
+                
+                float lat, lng;
+                if (getLastKnownPosition(id, lat, lng)) {
+                    // Check if clear button was pressed
+                    if (isTouchInButton(x, y, tft.width() - 60, yPos + 5, 50, 30)) {
+                        // Clear this position
+                        clearLastKnownPosition(id);
+                        // Redraw the page
+                        drawLastPositionsPage();
+                        return true;
+                    }
+                    
+                    yPos += 60;
+                }
+            }
+            break;
     }
     
     return false;
@@ -733,12 +741,156 @@ void RocketMonitorScreen::processKeyPress(int x, int y) {
 
 // Update display based on current page
 void RocketMonitorScreen::updateDisplay() {
-    if (currentPage == 0) {
-        updateMainPageValues();
-    } else if (currentPage >= 1 && currentPage <= 3) {
-        updateGraph();
-    } else if (currentPage == 4) {
-        drawTransmitterSelectionPage();
+    switch (currentPage) {
+        case 0: // Main data page
+            drawMainPage();
+            break;
+        case 1: // Altitude graph
+        case 2: // Speed graph
+        case 3: // TX Power graph
+            drawGraphPage();
+            break;
+        case 4: // Transmitter selection page
+            drawTransmitterSelectionPage();
+            break;
+        case 5: // Last known positions page
+            drawLastPositionsPage();
+            break;
+    }
+}
+
+// Save last known position for a transmitter
+void RocketMonitorScreen::saveLastKnownPosition(uint32_t transmitterId, float lat, float lng) {
+    if (transmitterId == 0 || lat == 0.0f || lng == 0.0f) {
+        return; // Don't save invalid positions
+    }
+    
+    lastPositionsStorage.begin("lastpos", false);
+    
+    // Create keys for this transmitter
+    String idStr = String(transmitterId, HEX);
+    String latKey = "lat_" + idStr;
+    String lngKey = "lng_" + idStr;
+    String timeKey = "time_" + idStr;
+    
+    // Save position and current time
+    lastPositionsStorage.putFloat(latKey.c_str(), lat);
+    lastPositionsStorage.putFloat(lngKey.c_str(), lng);
+    lastPositionsStorage.putULong(timeKey.c_str(), millis());
+    
+    lastPositionsStorage.end();
+}
+
+// Clear last known position for a transmitter
+void RocketMonitorScreen::clearLastKnownPosition(uint32_t transmitterId) {
+    if (transmitterId == 0) {
+        return;
+    }
+    
+    lastPositionsStorage.begin("lastpos", false);
+    
+    // Create keys for this transmitter
+    String idStr = String(transmitterId, HEX);
+    String latKey = "lat_" + idStr;
+    String lngKey = "lng_" + idStr;
+    String timeKey = "time_" + idStr;
+    
+    // Remove position data
+    lastPositionsStorage.remove(latKey.c_str());
+    lastPositionsStorage.remove(lngKey.c_str());
+    lastPositionsStorage.remove(timeKey.c_str());
+    
+    lastPositionsStorage.end();
+}
+
+// Get last known position for a transmitter
+bool RocketMonitorScreen::getLastKnownPosition(uint32_t transmitterId, float &lat, float &lng) {
+    if (transmitterId == 0) {
+        return false;
+    }
+    
+    lastPositionsStorage.begin("lastpos", true); // Read-only mode
+    
+    // Create keys for this transmitter
+    String idStr = String(transmitterId, HEX);
+    String latKey = "lat_" + idStr;
+    String lngKey = "lng_" + idStr;
+    
+    // Check if we have position data for this transmitter
+    if (!lastPositionsStorage.isKey(latKey.c_str()) || !lastPositionsStorage.isKey(lngKey.c_str())) {
+        lastPositionsStorage.end();
+        return false;
+    }
+    
+    // Get position data
+    lat = lastPositionsStorage.getFloat(latKey.c_str(), 0.0f);
+    lng = lastPositionsStorage.getFloat(lngKey.c_str(), 0.0f);
+    
+    lastPositionsStorage.end();
+    return (lat != 0.0f && lng != 0.0f);
+}
+
+// Draw the last known positions page
+void RocketMonitorScreen::drawLastPositionsPage() {
+    // Clear screen
+    tft.fillScreen(TFT_BLACK);
+    
+    // Draw page title
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextDatum(TC_DATUM); // Top center
+    tft.drawString("Last Known Positions", tft.width()/2, 10, 2);
+    
+    // Draw navigation buttons
+    drawNavigationButtons(rocketSelected);
+    
+    // Draw battery indicator
+    drawBatteryIndicator(batteryPercent);
+    
+    // Set text properties for the list
+    tft.setTextDatum(TL_DATUM); // Top left
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    
+    int yPos = 50;
+    int count = 0;
+    
+    // Display last known position for each transmitter
+    for (int i = 0; i < numTransmitters; i++) {
+        uint32_t id = knownTransmitters[i];
+        if (id == 0) continue;
+        
+        float lat, lng;
+        if (getLastKnownPosition(id, lat, lng)) {
+            // Get rocket name
+            String name = getTransmitterName(id);
+            
+            // Draw rocket name
+            tft.setTextColor(TFT_GREEN, TFT_BLACK);
+            tft.drawString(name, 10, yPos, 2);
+            
+            // Draw coordinates
+            tft.setTextColor(TFT_WHITE, TFT_BLACK);
+            char coordStr[50];
+            sprintf(coordStr, "Lat: %0.6f, Lng: %0.6f", lat, lng);
+            tft.drawString(coordStr, 10, yPos + 20, 2);
+            
+            // Draw clear button
+            tft.fillRoundRect(tft.width() - 60, yPos + 5, 50, 30, 5, TFT_RED);
+            tft.setTextColor(TFT_WHITE, TFT_RED);
+            tft.setTextDatum(MC_DATUM); // Middle center
+            tft.drawString("Clear", tft.width() - 35, yPos + 20, 2);
+            tft.setTextDatum(TL_DATUM); // Back to top left
+            
+            yPos += 60;
+            count++;
+        }
+    }
+    
+    // If no positions found
+    if (count == 0) {
+        tft.setTextColor(TFT_WHITE, TFT_BLACK);
+        tft.setTextDatum(MC_DATUM); // Middle center
+        tft.drawString("No saved positions", tft.width()/2, tft.height()/2, 2);
+        tft.setTextDatum(TL_DATUM); // Back to top left
     }
 }
 

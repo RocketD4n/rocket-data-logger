@@ -22,7 +22,7 @@ public:
     static const int MAX_TRANSMITTERS = 10;
     static const int MAX_NAME_LENGTH = 16;
     static const int MAX_DATA_POINTS = 100;
-    static const int NUM_PAGES = 5; // Main page + 3 graph pages + transmitter selection page
+    static const int NUM_PAGES = 6; // Main page + 3 graph pages + transmitter selection page + last positions page
     
     // Display layout constants
     static const int HEADER_HEIGHT = 30;
@@ -61,6 +61,7 @@ public:
     void drawGraphPage();
     void updateGraph();
     void drawTransmitterSelectionPage();
+    void drawLastPositionsPage();
     void drawKeyboard();
     void drawLowBattery();
     
@@ -120,6 +121,11 @@ public:
     uint8_t launchState = 0;
     uint32_t rocketUptime = 0; // Rocket uptime in milliseconds
     
+    // Last known position storage
+    void saveLastKnownPosition(uint32_t transmitterId, float lat, float lng);
+    void clearLastKnownPosition(uint32_t transmitterId);
+    bool getLastKnownPosition(uint32_t transmitterId, float &lat, float &lng);
+    
     // Packet statistics
     unsigned long lastPacketTime = 0;
     int packetCount = 0;
@@ -140,7 +146,8 @@ private:
     // References to external objects
     TFT_eSPI& tft;
     XPT2046_Touchscreen& ts;
-    Preferences preferences;
+    Preferences rocketNamesStorage; // For storing rocket names
+    Preferences lastPositionsStorage; // For storing last known positions
     
     // Display page control
     int currentPage = 4; // 0 = main data page, 1-3 = graph pages, 4 = transmitter selection page
