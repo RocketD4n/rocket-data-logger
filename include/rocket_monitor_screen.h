@@ -111,15 +111,17 @@ public:
     // These are made public to allow easier access from the main program
     float currentAltitude = 0.0f;
     float maxAltitude = 0.0f;
-    float currentLat = 0.0f;
-    float currentLng = 0.0f;
-    float batteryVoltage = 0.0f;
-    uint8_t batteryPercent = 0;
+    float currentSpeed = 0.0f;
+    float baroVelocity = 0.0f;
     float temperature = 0.0f;
     float maxG = 0.0f;
+    float batteryVoltage = 0.0f;
+    uint8_t batteryPercent = 0;
     int8_t txPower = 0;
-    uint8_t launchState = 0;
     uint32_t rocketUptime = 0; // Rocket uptime in milliseconds
+    uint8_t launchState = 0;
+    float currentLat = 0.0f;
+    float currentLng = 0.0f;
     
     // Last known position storage
     void saveLastKnownPosition(uint32_t transmitterId, float lat, float lng);
@@ -146,7 +148,7 @@ public:
     
     // Data update methods for different packet types
     void updateGpsData(float lat, float lng);
-    void updateAltitudeData(float altitude, float maxAlt, float temp, float maxG, uint8_t launchState);
+    void updateAltitudeData(float altitude, float maxAlt, float temp, float maxG, float accelVelocity, float baroVelocity);
     void updateSystemData(float battV, uint8_t battPct, int8_t txPwr, uint32_t uptime);
     void updateGraphData(float altitude, float speed, int8_t txPower);
     void addTransmitter(uint32_t transmitterId);
@@ -190,13 +192,6 @@ private:
         {'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ' '},
         {'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', ' ', '>'}
     };
-    
-    // Speed calculation variables (these remain private)
-    
-    // Speed calculation variables
-    float currentSpeed = 0.0f;
-    float lastAltitude = 0.0f;
-    unsigned long lastAltitudeTime = 0;
     
     // Graph configuration
     const char* graphTitles[3] = {"Altitude vs Time", "Speed vs Time", "TX Power vs Time"};

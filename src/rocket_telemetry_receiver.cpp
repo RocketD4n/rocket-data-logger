@@ -235,11 +235,12 @@ void processAltitudePacket(uint8_t* buffer, size_t length) {
     float maxAlt = packet->maxAltitude;
     float temp = packet->temperature / 10.0f; // Convert back to degrees C
     float maxG = packet->maxG / 10.0f; // Convert back to g
-    uint8_t launchState = packet->launchState;
+    float accelVelocity = packet->accelVelocity / 100.0f; // Convert from cm/s to m/s
+    float baroVelocity = packet->baroVelocity / 100.0f; // Convert from cm/s to m/s
     
     // Update altitude data using the specialized method
-    // This will also handle speed calculation and graph updates
-    display.updateAltitudeData(altitude, maxAlt, temp, maxG, launchState);
+    // Now using transmitted velocity values instead of calculating locally
+    display.updateAltitudeData(altitude, maxAlt, temp, maxG, accelVelocity, baroVelocity);
     
     // Log to SD card if available and altitude has changed by threshold amount
     if (sdCardAvailable && display.isRocketSelected() && transmitterId == display.getSelectedTransmitterId()) {
@@ -264,7 +265,9 @@ void processAltitudePacket(uint8_t* buffer, size_t length) {
                 altitudeLogFile.print(",");
                 altitudeLogFile.print(maxG, 2);
                 altitudeLogFile.print(",");
-                altitudeLogFile.println(launchState);
+                altitudeLogFile.print(accelVelocity);
+                altitudeLogFile.print(",");
+                altitudeLogFile.println(baroVelocity);
                 altitudeLogFile.flush();
             }
             
@@ -293,7 +296,9 @@ void processAltitudePacket(uint8_t* buffer, size_t length) {
                 systemLogFile.print(",");
                 systemLogFile.print(latestSystemPacket.txPower);
                 systemLogFile.print(",");
-                systemLogFile.println(latestSystemPacket.bootTime);
+                systemLogFile.print(latestSystemPacket.bootTime);
+                systemLogFile.print(",");
+                systemLogFile.println(latestSystemPacket.launchState);
                 systemLogFile.flush();
                 hasNewSystemData = false;
             }
@@ -330,6 +335,7 @@ void processSystemPacket(uint8_t* buffer, size_t length) {
     uint8_t battPct = packet->batteryPercent;
     int8_t txPwr = packet->txPower;
     uint32_t bootTime = packet->bootTime;
+    uint8_t launchState = packet->launchState; // Get launch state from system packet
     
     // Store rocket boot time for log file naming
     if (rocketBootTime == 0 && bootTime > 0) {
@@ -345,6 +351,9 @@ void processSystemPacket(uint8_t* buffer, size_t length) {
     
     // Update system data using the specialized method
     display.updateSystemData(battV, battPct, txPwr, uptime);
+    
+    // Update launch state
+    display.launchState = launchState;
     
     // Store latest system packet for logging when altitude changes
     memcpy(&latestSystemPacket, packet, sizeof(SystemDataPacket));

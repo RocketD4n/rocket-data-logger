@@ -177,31 +177,22 @@ void RocketMonitorScreen::updateGpsData(float lat, float lng) {
 }
 
 // Update altitude data
-void RocketMonitorScreen::updateAltitudeData(float altitude, float maxAlt, float temp, float maxG, uint8_t launchState) {
+void RocketMonitorScreen::updateAltitudeData(float altitude, float maxAlt, float temp, float maxG, float accelVelocity, float baroVelocity) {
     currentAltitude = altitude;
     maxAltitude = maxAlt;
     temperature = temp;
     this->maxG = maxG;
-    this->launchState = launchState;
+    
+    // Use transmitted velocity values instead of calculating locally
+    // We'll use the accelerometer-based velocity as our primary speed value
+    currentSpeed = accelVelocity;
+    
+    // Store barometric velocity for potential display or comparison
+    this->baroVelocity = baroVelocity;
     
     // Update last packet time
     lastPacketTime = millis();
     packetCount++;
-    
-    // Calculate speed based on altitude change
-    unsigned long currentTime = millis();
-    static float lastAlt = 0.0f;
-    static unsigned long lastAltTime = 0;
-    
-    if (lastAltTime > 0) {
-        float timeDelta = (currentTime - lastAltTime) / 1000.0f; // Convert to seconds
-        if (timeDelta > 0) {
-            currentSpeed = (altitude - lastAlt) / timeDelta; // m/s
-        }
-    }
-    
-    lastAlt = altitude;
-    lastAltTime = currentTime;
     
     // Update graph data
     updateGraphData(altitude, currentSpeed, txPower);

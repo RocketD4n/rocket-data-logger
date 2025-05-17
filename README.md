@@ -12,6 +12,9 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 - **Power-saving Mode**: Automatically reduces transmission frequency when battery is low (<45%)
 - **SD Card Logging**: Automatically logs all telemetry data to CSV files on the receiver's SD card when installed
 - **Recovery Buzzer**: Remote-activated audio beacon to help locate the rocket after landing
+- **Dual Velocity Calculation**: Computes velocity using both accelerometer integration and barometric altitude changes for redundancy
+- **Orientation Estimation**: Calibrates accelerometer with orientation detection to account for non-vertical mounting
+- **Calibration Logging**: Records detailed calibration data to SD card for post-flight analysis
 
 ## Hardware Requirements
 
@@ -165,7 +168,8 @@ struct AltitudePacket {
     uint16_t maxAltitude;   // Maximum recorded altitude in meters
     uint16_t temperature;   // Temperature in degrees C * 10
     uint16_t maxG;          // Maximum G-force * 10
-    uint8_t launchState;    // 0=waiting, 1=launched, 2=landed
+    int16_t accelVelocity;  // Velocity from accelerometer in cm/s
+    int16_t baroVelocity;   // Velocity from barometer in cm/s
     uint8_t checksum;       // XOR checksum of all previous bytes
 };
 ```
@@ -181,6 +185,7 @@ struct SystemDataPacket {
     uint8_t batteryPercent; // Battery percentage (0-100)
     int8_t txPower;         // Current transmission power in dBm
     uint32_t bootTime;      // Boot time in seconds since epoch (from GPS)
+    uint8_t launchState;    // 0=waiting, 1=launched, 2=landed
     uint8_t checksum;       // XOR checksum of all previous bytes
 };
 ```
@@ -197,6 +202,56 @@ struct SnrFeedbackPacket {
 };
 ```
 
+## Velocity Calculation
+
+The system uses two complementary methods to calculate velocity for redundancy and accuracy:
+
+### Accelerometer-based Velocity
+
+1. **Orientation-aware Integration**: 
+   - Acceleration is projected onto the rocket's vertical axis determined during calibration
+   - Compensates for non-vertical mounting of the sensor
+   - Integrates acceleration over time to derive velocity
+
+2. **Bias Correction**:
+   - Calibration process measures and removes sensor bias
+   - Gravity compensation is applied based on flight state (in-flight vs. stationary)
+
+3. **Drift Mitigation**:
+   - Velocity is reset to zero when stationary and not in flight
+   - Gradual decay applied after landing to correct for integration drift
+
+### Barometric-based Velocity
+
+1. **Altitude Differentiation**:
+   - Calculates velocity as the rate of change in altitude
+   - Uses time-delta between altitude readings for accurate differentiation
+
+2. **Noise Filtering**:
+   - Low-pass filter applied to reduce noise in barometric readings
+   - Large time steps are ignored to prevent inaccurate calculations
+
+Both velocity values are logged and transmitted, allowing for post-flight comparison and analysis.
+
+## Accelerometer Calibration
+
+The accelerometer undergoes a comprehensive calibration process at startup:
+
+1. **Bias Measurement**:
+   - Collects multiple samples (100) while the rocket is stationary
+   - Calculates average readings for each axis to determine electronic bias
+
+2. **Orientation Estimation**:
+   - Measures gravity vector in the sensor frame
+   - Calculates the rocket's vertical axis (opposite to gravity)
+   - Determines tilt angle from vertical in degrees
+
+3. **Calibration Data Logging**:
+   - Creates a calibration file with timestamp (e.g., `20250517_120000_cal.txt`)
+   - Records raw accelerometer data for all samples
+   - Stores calculated bias values, gravity vector, rocket axis, and tilt angle
+   - Provides detailed data for post-flight analysis and troubleshooting
+
 ## SD Card Logging
 
 The receiver automatically logs all telemetry data to CSV files on the SD card when one is inserted in the TFT display's SD card slot. The logging system creates three separate CSV files for each rocket transmitter:
@@ -212,7 +267,43 @@ The receiver automatically logs all telemetry data to CSV files on the SD card w
 
 To minimize SD card wear and optimize storage, data is only written to all three log files when the altitude changes by at least 1 meter. This ensures that critical flight data is captured while avoiding excessive writes during periods of minimal altitude change (e.g., before launch or after landing).
 
-Each log entry includes a timestamp from the receiver, allowing for accurate time-series analysis. The filenames include the rocket's name (or ID if unnamed) and the rocket's power-on date and time obtained from GPS, making it easy to organize data from multiple flights.
+The system creates several types of log files on the SD card:
+
+### 1. Telemetry Log Files
+
+- **Format**: CSV files with timestamped entries
+- **Filename Pattern**: `YYYYMMDD_HHMMSS.csv` (based on GPS time at startup)
+- **Contents**: All telemetry data including altitude, GPS coordinates, velocity, acceleration, temperature, and system status
+- **Each entry includes**:
+  - Timestamp
+  - Altitude (current and maximum)
+  - GPS coordinates
+  - Accelerometer-based velocity
+  - Barometer-based velocity
+  - Temperature
+  - Maximum G-force
+  - Battery status
+  - Launch state
+
+### 2. Calibration Log Files
+
+- **Format**: Text files with detailed calibration data
+- **Filename Pattern**: `YYYYMMDD_HHMMSS_cal.txt` (matching the telemetry log)
+- **Contents**:
+  - Raw accelerometer readings for all calibration samples
+  - Average values for each axis
+  - Calculated gravity vector
+  - Rocket axis orientation
+  - Tilt angle from vertical
+  - Bias values for each axis
+
+### 3. Receiver Log Files
+
+- **Format**: CSV files with receiver-side data
+- **Filename Pattern**: `RX_YYYYMMDD_HHMMSS.csv`
+- **Contents**: Signal quality metrics, packet statistics, and received telemetry
+
+Each log entry includes a timestamp, allowing for accurate time-series analysis. The filenames include the rocket's power-on date and time obtained from GPS, making it easy to organize data from multiple flights.
 
 ## Pin Configuration
 

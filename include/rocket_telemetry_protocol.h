@@ -54,7 +54,8 @@ struct AltitudePacket {
     uint16_t maxAltitude;
     uint16_t temperature;
     uint16_t maxG;
-    uint8_t launchState;
+    int16_t accelVelocity;   // Velocity from accelerometer integration (cm/s)
+    int16_t baroVelocity;    // Velocity from barometric calculation (cm/s)
     uint8_t checksum;
 };
 
@@ -68,6 +69,7 @@ struct SystemDataPacket {
     uint8_t batteryPercent;
     int8_t txPower;         // Current transmission power in dBm
     uint32_t bootTime;      // Boot time in seconds since epoch (from GPS)
+    uint8_t launchState;    // Current launch state (waiting, launched, landed)
     uint8_t checksum;
 };
 

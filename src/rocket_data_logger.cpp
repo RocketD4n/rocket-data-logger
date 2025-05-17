@@ -1,7 +1,14 @@
 /*
  *  TODO:
  *  - receiver to offer binding options
- *  - LVGL graphics on reciever screen
+ *  - LVGL graphics on reciever screen:
+Using LVGL (Light and Versatile Graphics Library) for rocket telemetry display could offer significant advantages over current TFT_eSPI implementation. 
+Advantages of LVGL
+1. Modern UI Components: LVGL provides ready-made widgets like buttons, charts, gauges, and tables that would enhance your telemetry display.
+2. Event-Driven Architecture: Instead of polling for touch events, LVGL uses an event-driven system that's more efficient.
+3. Animations and Transitions: Smooth transitions between pages and animated elements would make the UI feel more polished.
+4. Theming Support: Easily create consistent visual styles across your application.
+5. Memory Efficiency: LVGL is designed for embedded systems with limited resources.
  */
  
 #include <Arduino.h>
@@ -9,10 +16,10 @@
 #include <SPI.h>
 #include <SD.h>
 #include <TinyGPS++.h>
-#include <Adafruit_MPU6050.h>
 #include <Adafruit_BMP085_U.h>
 #include <MAX1704X.h>
 #include <algorithm> // For std::max
+#include "rocket_accelerometer.h"
 
 // CC1101 configuration
 #define CC1101_CS 16  // D0 on NodeMCU
@@ -33,7 +40,9 @@ bool launchDetected = false;
 bool landedDetected = false;
 unsigned long landedTime = 0;
 char line[256];
-float maxG = 0.0f;
+
+// Accelerometer instance
+RocketAccelerometer accel;
 
 // Buzzer control variables
 bool buzzerActive = false;
@@ -77,7 +86,6 @@ void setLedBlue() { setLedColor(false, false, true); }
 #define ALTITUDE_DROP_THRESHOLD 10.0f // meters
 #define BACKUP_DELAY 1000000 // 1 second in microseconds
 
-Adafruit_MPU6050 mpu;
 Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
 MAX1704X lipo(0.00125f);  // MAX17043 voltage resolution
 File Textfile;
@@ -104,11 +112,13 @@ void processCommandPacket(uint8_t* buffer, size_t length);
 void adjustTransmissionPower(float snr);
 void controlBuzzer(bool active);
 
+
 // Get the unique chip ID for this transmitter
 uint32_t transmitterId = 0;
 
 TinyGPSPlus gps;
-// Using hardware Serial for GPS
+
+char filename_base[24];
 
 void getAltitudeAndTemp(float& altitude, float& temp) {
   sensors_event_t event;
@@ -171,12 +181,12 @@ void setup() {
   digitalWrite(BACKUP_RELAY_PIN, LOW);  // Start with backup relay off
 
   Serial.println("Initializing MPU6050...");
-  if (!mpu.begin()) {
+  if (!accel.begin()) {
     Serial.println("MPU6050 initialization failed!");
     setLedRed();  // Red indicates error
     while (1);
   }
-  Serial.println("MPU6050 ready!");
+  
 
   if (!bmp.begin()) {
     Serial.println("BMP180 not detected. Check wiring.");
@@ -271,9 +281,10 @@ void setup() {
   
   // Format filename as YYYYMMDD_HHMMSS.csv
   char filename[24];
-  snprintf(filename, sizeof(filename), "%04d%02d%02d_%02d%02d%02d.csv",
+  snprintf(filename_base, sizeof(filename_base), "%04d%02d%02d_%02d%02d%02d",
            gps.date.year(), gps.date.month(), gps.date.day(),
            gps.time.hour(), gps.time.minute(), gps.time.second());
+  snprintf(filename, sizeof(filename), "%s.csv", filename_base);
   Textfile = SD.open(filename, FILE_WRITE);
 
   if (Textfile) {
@@ -291,9 +302,15 @@ void setup() {
     Serial.println("done");
   }
 
+  // Set pointers to launch detection state variables
+  accel.setLaunchDetectionPointers(&launchDetected, &landedDetected);
+  
+  // Calibrate the accelerometer at startup
+  accel.calibrate(filename_base);
+
   Serial.println("Initialization completed");
   setLedGreen();  // Green indicates successful initialization with GPS fix
- Serial.println("Waiting for launch....");
+  Serial.println("Waiting for launch....");
 }
 
 void sendGpsData() {
@@ -322,31 +339,10 @@ void sendSystemData() {
   packet.packetType = PACKET_TYPE_SYSTEM;
   packet.transmitterId = transmitterId;
   packet.uptime = millis();
-  packet.batteryMillivolts = (uint16_t)(lipo.voltage() * 1000);
-  packet.batteryPercent = (uint8_t)lipo.percent();
-  packet.txPower = (int8_t)radio->getCurrentPower();
+  packet.batteryMillivolts = lipo.voltage() * 1000;
+  packet.batteryPercent = lipo.percent();
+  packet.txPower = txPower;
   packet.bootTime = bootTimeEpoch;
-  packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
-  
-  radio->transmit((uint8_t*)&packet, sizeof(packet));
-}
-
-void sendAltitudeData() {
-  float altitude, temperature;
-  getAltitudeAndTemp(altitude, temperature);
-  
-  if (altitude > maxAltitude) {
-    maxAltitude = altitude;
-  }
-  
-  AltitudePacket packet;
-  packet.version = PROTOCOL_VERSION;
-  packet.packetType = PACKET_TYPE_ALTITUDE;
-  packet.transmitterId = transmitterId;
-  packet.currentAltitude = altitude;
-  packet.maxAltitude = maxAltitude;
-  packet.temperature = temperature * 10; // Store with 0.1°C precision
-  packet.maxG = maxG * 10; // Store with 0.1g precision
   
   // Set launch state using the enum values
   if (landedDetected) {
@@ -356,6 +352,33 @@ void sendAltitudeData() {
   } else {
     packet.launchState = LAUNCH_STATE_WAITING;    // Pre-launch
   }
+  
+  packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
+  
+  radio->transmit((uint8_t*)&packet, sizeof(SystemDataPacket));
+}
+
+void sendAltitudeData() {
+  float altitude, temperature;
+  getAltitudeAndTemp(altitude, temperature);
+
+  if (altitude > maxAltitude) {
+    maxAltitude = altitude;
+  }
+
+  AltitudePacket packet;
+  packet.version = PROTOCOL_VERSION;
+  packet.packetType = PACKET_TYPE_ALTITUDE;
+  packet.transmitterId = transmitterId;
+  packet.currentAltitude = altitude;
+  packet.maxAltitude = maxAltitude;
+  packet.temperature = temperature * 10; // Store with 0.1°C precision
+  packet.maxG = accel.getMaxG() * 10; // Store with 0.1g precision
+  packet.accelVelocity = (int16_t)(accel.getAccelVelocity() * 100); // Store in cm/s
+  packet.baroVelocity = (int16_t)(accel.getBaroVelocity() * 100); // Store in cm/s
+
+  // Launch state is now in the SystemDataPacket, not in AltitudePacket
+
   
   packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
   
@@ -425,6 +448,8 @@ void controlBuzzer(bool active) {
   Serial.println(buzzerActive ? "activated" : "deactivated");
 }
 
+
+
 void loop() {
   // Get current battery percentage with hysteresis to prevent rapid mode switching
   static bool lowBatteryMode = false;
@@ -484,10 +509,16 @@ void loop() {
   
   // Process IMU data
   sensors_event_t a, g, temp;
-  mpu.getEvent(&a, &g, &temp);
+  accel.mpu.getEvent(&a, &g, &temp);
+  
+  // Update velocity calculations
+  accel.updateVelocity(a);
   
   float altitude, temperature;
   getAltitudeAndTemp(altitude, temperature);
+  
+  // Update barometric velocity calculation
+  accel.updateBaroVelocity(altitude);
   
   // Check for launch and handle deployment    
   if (launchDetected) {
@@ -510,8 +541,7 @@ void loop() {
   float aTotal = sqrt(a.acceleration.x * a.acceleration.x 
                      + a.acceleration.y * a.acceleration.y 
                      + a.acceleration.z * a.acceleration.z);
-  // Use Arduino's max function with explicit type casting
-  maxG = max(maxG, (float)(aTotal / 9.8f)); // Convert to g units
+  // maxG is now updated in the accelerometer class
   
   // Launch detection
   if (!launchDetected && aTotal > 1.7 * 9.8) { // 1.7g threshold
@@ -590,14 +620,18 @@ void loop() {
   if (shouldLog) {
     // Log data to SD card
     if (Textfile) {
-      sprintf(line, "%lu,%0.6f,%0.6f,%0.1f,%0.1f,%0.1f,%0.1f,%d,%d,%d,%d",
+      sprintf(line, "%lu,%0.6f,%0.6f,%0.1f,%0.1f,%0.1f,%0.1f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d",
               millis(),
               gps.location.lat(),
               gps.location.lng(),
               altitude,
               temperature,
               maxAltitude,
-              maxG,
+              accel.getMaxG(),
+              accel.getAccelVelocity(),
+              accel.getMaxAccelVelocity(),
+              accel.getBaroVelocity(),
+              accel.getMaxBaroVelocity(),
               launchDetected ? 1 : 0,
               landedDetected ? 1 : 0,
               (int)lipo.voltage(),
