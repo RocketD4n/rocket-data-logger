@@ -479,13 +479,21 @@ void loop() {
   
   lastAltitude = altitude;
   
-  // Determine if we should log to SD card based on landed state
+  // Determine if we should log to SD card based on flight state
   static unsigned long lastLogTime = 0;
   bool shouldLog = false;
   
-  if (!landedDetected) {
+  if (!launchDetected) {
+    // Pre-launch: Log once every 10 seconds
+    if (millis() - lastLogTime >= 10000) { // 10 seconds
+      shouldLog = true;
+      lastLogTime = millis();
+    }
+  } else if (!landedDetected) {
+    // During flight: Log at full frequency
     shouldLog = true;
   } else {
+    // Post-landing: Log once every 60 seconds
     if (millis() - lastLogTime >= 60000) { // 60 seconds
       shouldLog = true;
       lastLogTime = millis();
