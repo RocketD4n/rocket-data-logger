@@ -510,11 +510,37 @@ void loop() {
     gps.encode(Serial.read());
   }
   
-  // Process any SNR feedback packets and adjust power if needed
+  // Process any incoming radio packets
   if (radio->available()) {
-    radio->processSnrFeedbackAndAdjustPower(TARGET_SNR);
-    // Update our local txPower variable to match the radio's current power
-    txPower = radio->getCurrentPower();
+    // Get the packet data
+    uint8_t buffer[64]; // Buffer for incoming packet
+    size_t length = 0;
+    
+    // Read the packet
+    if (radio->receive(buffer, length) == RADIOLIB_ERR_NONE) {
+      // Check packet type
+      if (length > 0) {
+        uint8_t packetType = buffer[0];
+        
+        switch (packetType) {
+          case PACKET_TYPE_FEEDBACK:
+            // Process SNR feedback and adjust power
+            radio->processSnrFeedbackAndAdjustPower(TARGET_SNR);
+            // Update our local txPower variable to match the radio's current power
+            txPower = radio->getCurrentPower();
+            break;
+            
+          case PACKET_TYPE_COMMAND:
+            // Process command packet
+            processCommandPacket(buffer, length);
+            break;
+            
+          default:
+            // Unknown packet type, ignore
+            break;
+        }
+      }
+    }
   }
   
   // Process IMU data
@@ -656,25 +682,27 @@ void loop() {
   }
   
   // Handle buzzer control with power-efficient pattern if active
-  if (buzzerActive) {
-    unsigned long currentTime = millis();
-    unsigned long timeInCycle = currentTime % BUZZER_CYCLE_INTERVAL;
+  static bool buzzerCurrentlyOn = false;
+  static unsigned long lastBuzzerCheck = 0;
+  
+  // Only check buzzer state every 50ms to reduce overhead
+  unsigned long currentTime = millis();
+  if (currentTime - lastBuzzerCheck >= 50) {
+    lastBuzzerCheck = currentTime;
     
-    // Turn buzzer on only for the beep duration at the start of each cycle
-    if (timeInCycle < BUZZER_BEEP_DURATION) {
-      // Buzzer should be on
-      if (digitalRead(BUZZER_PIN) == LOW) {
-        digitalWrite(BUZZER_PIN, HIGH);
-      }
-    } else {
-      // Buzzer should be off
-      if (digitalRead(BUZZER_PIN) == HIGH) {
-        digitalWrite(BUZZER_PIN, LOW);
-      }
+    bool shouldBuzzerBeOn = false;
+    
+    if (buzzerActive) {
+      unsigned long timeInCycle = currentTime % BUZZER_CYCLE_INTERVAL;
+      // Buzzer should be on during the beep duration at the start of each cycle
+      shouldBuzzerBeOn = (timeInCycle < BUZZER_BEEP_DURATION);
     }
-  } else {
-    // Make sure buzzer is off when not active
-    digitalWrite(BUZZER_PIN, LOW);
+    
+    // Only change the buzzer state if needed
+    if (shouldBuzzerBeOn != buzzerCurrentlyOn) {
+      digitalWrite(BUZZER_PIN, shouldBuzzerBeOn ? HIGH : LOW);
+      buzzerCurrentlyOn = shouldBuzzerBeOn;
+    }
   }
   
   // Small delay to prevent CPU hogging
