@@ -2,7 +2,6 @@
  *  TODO:
  *  - receiver to send to rocket command to make sound
  *  - receiver to offer binding options
- *  - SD card logger in the receiver logging all data received to various CSVs
  *  - LVGL graphics on reciever screen
  */
  
@@ -36,6 +35,9 @@ bool landedDetected = false;
 unsigned long landedTime = 0;
 char line[256];
 float maxG = 0.0f;
+
+// Boot time tracking
+uint32_t bootTimeEpoch = 0; // Boot time in seconds since epoch (from GPS)
 
 // Adaptive power control parameters
 const float TARGET_SNR = 15.0f;       // Target SNR for reliable communication (dB)
@@ -217,6 +219,40 @@ void setup() {
     gps.encode(Serial.read());
   }
   
+  // Wait for valid date and time from GPS to set boot time
+  unsigned long waitStart = millis();
+  while (!gps.time.isValid() || !gps.date.isValid()) {
+    while (Serial.available() > 0) {
+      gps.encode(Serial.read());
+    }
+    
+    // Timeout after 30 seconds if we can't get valid time
+    if (millis() - waitStart > 30000) {
+      Serial.println("Timeout waiting for GPS time. Using default epoch time.");
+      bootTimeEpoch = 0;
+      break;
+    }
+    delay(100);
+  }
+  
+  if (gps.time.isValid() && gps.date.isValid()) {
+    // Use time.h to convert GPS date/time to epoch time (seconds since Jan 1, 1970)
+    struct tm timeinfo;
+    timeinfo.tm_year = gps.date.year() - 1900; // Years since 1900
+    timeinfo.tm_mon = gps.date.month() - 1;    // Months since January (0-11)
+    timeinfo.tm_mday = gps.date.day();         // Day of the month (1-31)
+    timeinfo.tm_hour = gps.time.hour();        // Hours since midnight (0-23)
+    timeinfo.tm_min = gps.time.minute();       // Minutes after the hour (0-59)
+    timeinfo.tm_sec = gps.time.second();       // Seconds after the minute (0-59)
+    timeinfo.tm_isdst = 0;                     // Daylight Saving Time flag
+    
+    // Convert to epoch time using mktime
+    bootTimeEpoch = mktime(&timeinfo);
+    
+    Serial.print("Boot time set to epoch: ");
+    Serial.println(bootTimeEpoch);
+  }
+  
   // Format filename as YYYYMMDD_HHMMSS.csv
   char filename[24];
   snprintf(filename, sizeof(filename), "%04d%02d%02d_%02d%02d%02d.csv",
@@ -273,6 +309,7 @@ void sendSystemData() {
   packet.batteryMillivolts = (uint16_t)(lipo.voltage() * 1000);
   packet.batteryPercent = (uint8_t)lipo.percent();
   packet.txPower = (int8_t)radio->getCurrentPower();
+  packet.bootTime = bootTimeEpoch;
   packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
   
   radio->transmit((uint8_t*)&packet, sizeof(packet));

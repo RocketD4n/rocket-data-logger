@@ -78,11 +78,11 @@ void RocketMonitorScreen::loadRocketNames() {
             }
             
             // If not found and we have space, add it
-            if (!found && numTransmitters < MAX_TRANSMITTERS) {
-                knownTransmitters[numTransmitters] = savedId;
-                rocketNames[numTransmitters] = name;
-                numTransmitters++;
-            }
+            //if (!found && numTransmitters < MAX_TRANSMITTERS) {
+              //  knownTransmitters[numTransmitters] = savedId;
+               // rocketNames[numTransmitters] = name;
+              //  numTransmitters++;
+            //}
         }
     }
     

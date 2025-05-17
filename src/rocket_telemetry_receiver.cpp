@@ -4,6 +4,8 @@
 #include <XPT2046_Touchscreen.h>
 #include <Wire.h>
 #include <MAX1704X.h>
+#include <SD.h>
+#include <time.h>
 #include "rocket_telemetry_protocol.h"
 #include "cc1101_radio.h"
 #include "rocket_monitor_screen.h"
@@ -35,37 +37,93 @@ void processAltitudePacket(uint8_t* buffer, size_t length);
 void processSystemPacket(uint8_t* buffer, size_t length);
 void lowBatteryShutdown();
 
-// Transmitter selection
-#define MAX_TRANSMITTERS 10
-#define MAX_NAME_LENGTH 16
-uint32_t knownTransmitters[MAX_TRANSMITTERS] = {0};
-String rocketNames[MAX_TRANSMITTERS];
-int numTransmitters = 0;
-int selectedTransmitterIndex = -1; // -1 means no transmitter selected
-uint32_t selectedTransmitterId = 0;
-
-// Preferences for storing rocket names
-Preferences preferences;
-
-// Keyboard variables
-bool showKeyboard = false;
-bool editingName = false;
-int editingTransmitterIndex = -1;
-String currentInput = "";
-const char keyboardChars[4][10] = {
-    {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'},
-    {'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'},
-    {'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ' '},
-    {'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', ' ', '>'}
-};
-#define KEY_WIDTH 30
-#define KEY_HEIGHT 30
-#define KEYBOARD_X 10
-#define KEYBOARD_Y 100
-
 // SNR feedback control
 unsigned long lastSnrFeedbackTime = 0;
 const unsigned long SNR_FEEDBACK_INTERVAL = 1000; // Send SNR feedback every 1 second
+
+// SD card configuration
+#define SD_CS 33 // SD card CS pin on TFT shield
+bool sdCardAvailable = false;
+
+// Logging variables
+float lastLoggedAltitude = 0.0f;
+const float ALTITUDE_LOG_THRESHOLD = 1.0f; // Log when altitude changes by 1 meter
+
+// File handles for logging
+File gpsLogFile;
+File altitudeLogFile;
+File systemLogFile;
+
+// Logging file paths
+String gpsLogPath;
+String altitudeLogPath;
+String systemLogPath;
+
+// Rocket boot time for filename generation
+uint32_t rocketBootTime = 0;
+
+// Store the latest GPS and system data for logging when altitude changes
+GpsDataPacket latestGpsPacket;
+bool hasNewGpsData = false;
+SystemDataPacket latestSystemPacket;
+bool hasNewSystemData = false;
+
+// Function to create log files for a specific transmitter
+void createLogFiles(uint32_t transmitterId, uint32_t bootTime) {
+    // Close any open files first
+    if (gpsLogFile) gpsLogFile.close();
+    if (altitudeLogFile) altitudeLogFile.close();
+    if (systemLogFile) systemLogFile.close();
+    
+    if (!sdCardAvailable) return;
+    
+    // Get transmitter name from the display class
+    String transmitterName = display.getTransmitterName(transmitterId);
+    
+    // Format bootTime as date_time string
+    char dateTimeStr[20];
+    time_t bootTimeT = bootTime;
+    struct tm *tm = gmtime(&bootTimeT);
+    
+    if (tm != NULL && bootTime > 0) {
+        strftime(dateTimeStr, sizeof(dateTimeStr), "%Y%m%d_%H%M%S", tm);
+    } else {
+        // Fallback if bootTime is invalid
+        sprintf(dateTimeStr, "unknown_time");
+    }
+    
+    // Create filenames
+    gpsLogPath = "/" + transmitterName + "_" + String(dateTimeStr) + "_gps.csv";
+    altitudeLogPath = "/" + transmitterName + "_" + String(dateTimeStr) + "_altitude.csv";
+    systemLogPath = "/" + transmitterName + "_" + String(dateTimeStr) + "_system.csv";
+    
+    // Open files and write headers
+    gpsLogFile = SD.open(gpsLogPath, FILE_WRITE);
+    if (gpsLogFile) {
+        gpsLogFile.println("receiver_time,latitude,longitude,altitude");
+        gpsLogFile.flush();
+    }
+    
+    altitudeLogFile = SD.open(altitudeLogPath, FILE_WRITE);
+    if (altitudeLogFile) {
+        altitudeLogFile.println("receiver_time,current_altitude,max_altitude,temperature,max_g,launch_state");
+        altitudeLogFile.flush();
+    }
+    
+    systemLogFile = SD.open(systemLogPath, FILE_WRITE);
+    if (systemLogFile) {
+        systemLogFile.println("receiver_time,uptime,battery_mv,battery_percent,tx_power,boot_time");
+        systemLogFile.flush();
+    }
+    
+    Serial.println("Created log files for transmitter: " + transmitterName);
+    Serial.println("GPS log: " + gpsLogPath);
+    Serial.println("Altitude log: " + altitudeLogPath);
+    Serial.println("System log: " + systemLogPath);
+    
+    // Reset altitude tracking for logging
+    lastLoggedAltitude = 0.0f;
+}
 
 void setup() {
     Serial.begin(115200);
@@ -88,6 +146,16 @@ void setup() {
     
     // Initialize the display manager
     display.begin();
+    
+    // Initialize SD card
+    Serial.print("Initializing SD card... ");
+    if (SD.begin(SD_CS)) {
+        Serial.println("SD card initialized successfully");
+        sdCardAvailable = true;
+    } else {
+        Serial.println("SD card initialization failed");
+        sdCardAvailable = false;
+    }
     
     // Initialize radio
     Serial.print(F("[Radio] Initializing ... "));
@@ -130,9 +198,14 @@ void processGpsPacket(uint8_t* buffer, size_t length) {
     GpsDataPacket* gpsPacket = (GpsDataPacket*)buffer;
     float lat = gpsPacket->latitude;
     float lng = gpsPacket->longitude;
+    uint16_t alt = gpsPacket->altitude;
     
     // Update GPS data using the specialized method
     display.updateGpsData(lat, lng);
+    
+    // Store latest GPS packet for logging when altitude changes
+    memcpy(&latestGpsPacket, gpsPacket, sizeof(GpsDataPacket));
+    hasNewGpsData = true;
 }
 
 // Process altitude packet
@@ -165,6 +238,68 @@ void processAltitudePacket(uint8_t* buffer, size_t length) {
     // Update altitude data using the specialized method
     // This will also handle speed calculation and graph updates
     display.updateAltitudeData(altitude, maxAlt, temp, maxG, launchState);
+    
+    // Log to SD card if available and altitude has changed by threshold amount
+    if (sdCardAvailable && display.isRocketSelected() && transmitterId == display.getSelectedTransmitterId()) {
+        // Check if altitude has changed enough to log
+        if (abs(altitude - lastLoggedAltitude) >= ALTITUDE_LOG_THRESHOLD) {
+            // Check if we need to create log files (first packet received)
+            if ((!altitudeLogFile || !gpsLogFile || !systemLogFile) && rocketBootTime > 0) {
+                createLogFiles(transmitterId, rocketBootTime);
+            }
+            
+            unsigned long currentTime = millis();
+            
+            // Log altitude data
+            if (altitudeLogFile) {
+                altitudeLogFile.print(currentTime);
+                altitudeLogFile.print(",");
+                altitudeLogFile.print(altitude, 2);
+                altitudeLogFile.print(",");
+                altitudeLogFile.print(maxAlt, 2);
+                altitudeLogFile.print(",");
+                altitudeLogFile.print(temp, 2);
+                altitudeLogFile.print(",");
+                altitudeLogFile.print(maxG, 2);
+                altitudeLogFile.print(",");
+                altitudeLogFile.println(launchState);
+                altitudeLogFile.flush();
+            }
+            
+            // Log GPS data if we have it
+            if (gpsLogFile && hasNewGpsData) {
+                gpsLogFile.print(currentTime);
+                gpsLogFile.print(",");
+                gpsLogFile.print(latestGpsPacket.latitude, 6); // 6 decimal places for lat/lng
+                gpsLogFile.print(",");
+                gpsLogFile.print(latestGpsPacket.longitude, 6);
+                gpsLogFile.print(",");
+                gpsLogFile.println(latestGpsPacket.altitude);
+                gpsLogFile.flush();
+                hasNewGpsData = false;
+            }
+            
+            // Log system data if we have it
+            if (systemLogFile && hasNewSystemData) {
+                systemLogFile.print(currentTime);
+                systemLogFile.print(",");
+                systemLogFile.print(latestSystemPacket.uptime);
+                systemLogFile.print(",");
+                systemLogFile.print(latestSystemPacket.batteryMillivolts);
+                systemLogFile.print(",");
+                systemLogFile.print(latestSystemPacket.batteryPercent);
+                systemLogFile.print(",");
+                systemLogFile.print(latestSystemPacket.txPower);
+                systemLogFile.print(",");
+                systemLogFile.println(latestSystemPacket.bootTime);
+                systemLogFile.flush();
+                hasNewSystemData = false;
+            }
+            
+            // Update last logged altitude
+            lastLoggedAltitude = altitude;
+        }
+    }
 }
 
 // Process system data packet
@@ -192,9 +327,26 @@ void processSystemPacket(uint8_t* buffer, size_t length) {
     float battV = packet->batteryMillivolts / 1000.0f;
     uint8_t battPct = packet->batteryPercent;
     int8_t txPwr = packet->txPower;
+    uint32_t bootTime = packet->bootTime;
+    
+    // Store rocket boot time for log file naming
+    if (rocketBootTime == 0 && bootTime > 0) {
+        rocketBootTime = bootTime;
+        Serial.print("Rocket boot time set to: ");
+        Serial.println(rocketBootTime);
+        
+        // If this is the first system packet with valid boot time, create log files
+        if (sdCardAvailable && display.isRocketSelected() && transmitterId == display.getSelectedTransmitterId()) {
+            createLogFiles(transmitterId, rocketBootTime);
+        }
+    }
     
     // Update system data using the specialized method
     display.updateSystemData(battV, battPct, txPwr, uptime);
+    
+    // Store latest system packet for logging when altitude changes
+    memcpy(&latestSystemPacket, packet, sizeof(SystemDataPacket));
+    hasNewSystemData = true;
 }
 
 // Send SNR feedback to the logger

@@ -55,6 +55,7 @@ struct SystemDataPacket {
     uint16_t batteryMillivolts;
     uint8_t batteryPercent;
     int8_t txPower;         // Current transmission power in dBm
+    uint32_t bootTime;      // Boot time in seconds since epoch (from GPS)
     uint8_t checksum;
 };
 

@@ -10,6 +10,7 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 - **Data Visualization**: Multiple graph pages showing altitude, speed, and transmission power over time
 - **Touchscreen Interface**: Easy navigation between data pages and transmitter selection
 - **Power-saving Mode**: Automatically reduces transmission frequency when battery is low (<45%)
+- **SD Card Logging**: Automatically logs all telemetry data to CSV files on the receiver's SD card when installed
 
 ## Hardware Requirements
 
@@ -30,7 +31,8 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 - Either:
   - CC1101 433MHz Receiver, or
   - SX1278 433MHz LoRa Receiver
-- 2.8" TFT Display (ILI9341)
+- 2.8" TFT Display (ILI9341) with SD card slot
+- MicroSD card for data logging
 
 ## Display Layout
 
@@ -177,6 +179,7 @@ struct SystemDataPacket {
     uint16_t batteryMillivolts; // Battery voltage in millivolts
     uint8_t batteryPercent; // Battery percentage (0-100)
     int8_t txPower;         // Current transmission power in dBm
+    uint32_t bootTime;      // Boot time in seconds since epoch (from GPS)
     uint8_t checksum;       // XOR checksum of all previous bytes
 };
 ```
@@ -192,6 +195,23 @@ struct SnrFeedbackPacket {
     uint8_t checksum;       // XOR checksum of all previous bytes
 };
 ```
+
+## SD Card Logging
+
+The receiver automatically logs all telemetry data to CSV files on the SD card when one is inserted in the TFT display's SD card slot. The logging system creates three separate CSV files for each rocket transmitter:
+
+1. **GPS Data Log** (`[transmitter_name/id]_[rocket_boot_time]_gps.csv`)
+   - Records latitude, longitude, and altitude data
+
+2. **Altitude Data Log** (`[transmitter_name/id]_[rocket_boot_time]_altitude.csv`)
+   - Records current altitude, maximum altitude, temperature, maximum G-force, and launch state
+
+3. **System Data Log** (`[transmitter_name/id]_[rocket_boot_time]_system.csv`)
+   - Records uptime, battery voltage, battery percentage, transmission power, and boot time
+
+To minimize SD card wear and optimize storage, data is only written to all three log files when the altitude changes by at least 1 meter. This ensures that critical flight data is captured while avoiding excessive writes during periods of minimal altitude change (e.g., before launch or after landing).
+
+Each log entry includes a timestamp from the receiver, allowing for accurate time-series analysis. The filenames include the rocket's name (or ID if unnamed) and the rocket's power-on date and time obtained from GPS, making it easy to organize data from multiple flights.
 
 ## Pin Configuration
 
@@ -216,13 +236,14 @@ struct SnrFeedbackPacket {
 
 ### Telemetry Receiver (ESP32) Pins
 | Function | ESP32 Pin | GPIO |
-|----------|-------------|------|
+|----------|-----------|------|
 | Radio CS | 5 | 5 |
 | Radio GDO0 | 4 | 4 |
 | Display DC | 2 | 2 |
 | Display CS | 15 | 15 |
 | Display Reset | 4 | 4 |
 | Touch CS | 21 | 21 |
+| SD Card CS | 33 | 33 |
 | MAX17043 SDA | 32 | 32 |
 | MAX17043 SCL | 22 | 22 |
 

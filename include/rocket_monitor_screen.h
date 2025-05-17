@@ -85,6 +85,27 @@ public:
     void setReceiverBatteryPercent(uint8_t percent) { batteryPercent = percent; }
     uint8_t getReceiverBatteryPercent() const { return batteryPercent; }
     
+    // Get transmitter name for a given ID
+    String getTransmitterName(uint32_t transmitterId) const {
+        for (int i = 0; i < numTransmitters; i++) {
+            if (knownTransmitters[i] == transmitterId) {
+                return rocketNames[i];
+            }
+        }
+        return String(transmitterId, HEX); // Return ID as hex if name not found
+    }
+    
+    // Get number of known transmitters
+    int getNumTransmitters() const { return numTransmitters; }
+    
+    // Get transmitter ID by index
+    uint32_t getTransmitterId(int index) const {
+        if (index >= 0 && index < numTransmitters) {
+            return knownTransmitters[index];
+        }
+        return 0;
+    }
+    
     // Public data members for telemetry and packet statistics
     // These are made public to allow easier access from the main program
     float currentAltitude = 0.0f;
