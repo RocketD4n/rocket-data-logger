@@ -2,6 +2,8 @@
 #include <SPI.h>
 #include <TFT_eSPI.h>
 #include <XPT2046_Touchscreen.h>
+#include <Wire.h>
+#include <MAX1704X.h>
 #include "rocket_telemetry_protocol.h"
 #include "cc1101_radio.h"
 
@@ -12,6 +14,12 @@
 // Touch screen configuration
 #define TOUCH_CS 21
 XPT2046_Touchscreen ts(TOUCH_CS);
+
+// Battery monitor configuration
+#define MAX17043_SDA 32
+#define MAX17043_SCL 22
+#define LOW_BATTERY_THRESHOLD 45.0
+MAX1704X batteryMonitor(0.00125f);
 
 // Initialize TFT display
 TFT_eSPI tft = TFT_eSPI();
@@ -30,6 +38,8 @@ void sendSnrFeedback();
 
 // Display layout constants
 #define HEADER_HEIGHT 30
+#define BATTERY_ICON_WIDTH 25
+#define BATTERY_ICON_HEIGHT 12
 #define VALUE_HEIGHT 26
 #define RIGHT_COL 180
 #define LABEL_COLOR TFT_YELLOW
@@ -56,6 +66,8 @@ float currentLat = 0.0f;
 float currentLng = 0.0f;
 float batteryVoltage = 0.0f;
 uint8_t batteryPercent = 0;
+float receiverBatteryVoltage = 0.0f;
+float receiverBatteryPercent = 0.0f;
 float temperature = 0.0f;
 float maxG = 0.0f;
 int8_t txPower = 0;
@@ -107,6 +119,22 @@ const unsigned long SNR_FEEDBACK_INTERVAL = 1000; // Send SNR feedback every 1 s
 void setup() {
     Serial.begin(115200);
     
+    // Initialize I2C for battery monitor
+    Wire.begin(MAX17043_SDA, MAX17043_SCL);
+    
+    // Initialize battery monitor
+    batteryMonitor.reset();
+    batteryMonitor.quickstart();
+    if (!batteryMonitor.begin()) {
+        Serial.println("Failed to initialize battery monitor!");
+    } else {
+        Serial.println("Battery monitor initialized successfully");
+        receiverBatteryPercent = batteryMonitor.percent();
+        Serial.print("Initial battery: ");
+        Serial.print(receiverBatteryPercent);
+        Serial.println("%");
+    }
+    
     // Initialize display
     tft.init();
     tft.setRotation(3); // Landscape
@@ -138,6 +166,41 @@ void setup() {
     Serial.println(F("Radio configured successfully!"));
 }
 
+// Draw battery icon and level at the top center of the screen
+void drawBatteryIndicator() {
+    int centerX = tft.width() / 2;
+    int batteryX = centerX - BATTERY_ICON_WIDTH / 2;
+    int batteryY = 5;
+    
+    // Draw battery outline
+    tft.drawRect(batteryX, batteryY, BATTERY_ICON_WIDTH, BATTERY_ICON_HEIGHT, TFT_WHITE);
+    tft.drawRect(batteryX + BATTERY_ICON_WIDTH, batteryY + 2, 3, BATTERY_ICON_HEIGHT - 4, TFT_WHITE);
+    
+    // Draw battery fill based on percentage
+    int fillWidth = (receiverBatteryPercent / 100.0) * (BATTERY_ICON_WIDTH - 2);
+    
+    // Choose color based on battery level
+    uint16_t fillColor;
+    if (receiverBatteryPercent > 75) {
+        fillColor = TFT_GREEN;
+    } else if (receiverBatteryPercent > 45) {
+        fillColor = TFT_YELLOW;
+    } else {
+        fillColor = TFT_RED;
+    }
+    
+    // Fill battery icon
+    tft.fillRect(batteryX + 1, batteryY + 1, fillWidth, BATTERY_ICON_HEIGHT - 2, fillColor);
+    
+    // Draw percentage text
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(String((int)receiverBatteryPercent) + "%", centerX, batteryY + BATTERY_ICON_HEIGHT + 8, 2);
+    
+    // Reset text alignment
+    tft.setTextDatum(TL_DATUM);
+}
+
 // Draw navigation buttons
 void drawNavigationButtons() {
     // Left button (back)
@@ -162,6 +225,7 @@ void drawNavigationButtons() {
 void drawMainPage() {
     tft.fillScreen(TFT_BLACK);
     drawNavigationButtons();
+    drawBatteryIndicator();
     
     // Draw labels
     tft.setTextColor(LABEL_COLOR, TFT_BLACK);
@@ -239,6 +303,7 @@ void updateMainPageValues() {
 void drawGraphPage() {
     tft.fillScreen(TFT_BLACK);
     drawNavigationButtons();
+    drawBatteryIndicator();
     
     // Get the graph index (0-2) from the current page (1-3)
     int graphIndex = currentPage - 1;
@@ -360,6 +425,7 @@ void updateDisplay() {
     } else if (currentPage == 4) {
         // Draw transmitter selection page
         tft.fillScreen(TFT_BLACK);
+        drawBatteryIndicator();
         tft.setTextColor(LABEL_COLOR, TFT_BLACK);
         tft.drawString("Select Transmitter:", 10, 10);
         
@@ -633,7 +699,45 @@ void sendSnrFeedback() {
     Serial.println(lastSnr);
 }
 
+// Display low battery shutdown message and shut down
+void lowBatteryShutdown() {
+    // Clear screen and show shutdown message
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("LOW BATTERY", tft.width()/2, tft.height()/2 - 20, 4);
+    tft.drawString("SHUTTING DOWN", tft.width()/2, tft.height()/2 + 20, 4);
+    
+    // Show battery percentage
+    tft.drawString(String((int)receiverBatteryPercent) + "%", tft.width()/2, tft.height()/2 + 60, 4);
+    
+    // Wait a few seconds to show the message
+    delay(5000);
+    
+    // Turn off display
+    tft.fillScreen(TFT_BLACK);
+    tft.writecommand(0x28); // DISPOFF command
+    tft.writecommand(0x10); // SLPIN command
+    
+    // Enter deep sleep
+    esp_deep_sleep_start();
+}
+
 void loop() {
+    // Read battery level
+    static unsigned long lastBatteryCheck = 0;
+    if (millis() - lastBatteryCheck >= 10000) { // Check every 10 seconds
+        receiverBatteryPercent = batteryMonitor.percent();
+        drawBatteryIndicator(); // Update battery indicator
+        
+        // Check for low battery condition
+        if (receiverBatteryPercent < LOW_BATTERY_THRESHOLD) {
+            lowBatteryShutdown();
+        }
+        
+        lastBatteryCheck = millis();
+    }
+    
     // Handle touch events
     handleTouch();
     

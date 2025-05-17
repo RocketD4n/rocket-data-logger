@@ -214,6 +214,40 @@ struct SnrFeedbackPacket {
 | Backup Relay | D7 | 13 |
 | LED | D4 | 2 |
 
+### Telemetry Receiver (ESP32) Pins
+| Function | ESP32 Pin | GPIO |
+|----------|-------------|------|
+| Radio CS | 5 | 5 |
+| Radio GDO0 | 4 | 4 |
+| Display DC | 2 | 2 |
+| Display CS | 15 | 15 |
+| Display Reset | 4 | 4 |
+| Touch CS | 21 | 21 |
+| MAX17043 SDA | 32 | 32 |
+| MAX17043 SCL | 22 | 22 |
+
+### Battery Monitoring and Charging
+
+The receiver uses a MAX17043 battery fuel gauge connected via I2C to monitor the LiPo battery level. This is paired with a TC4056 LiPo battery charger module for safe charging.
+
+#### TC4056 Connections:
+- OUT+ → ESP32 VIN
+- OUT+ → MAX17043 CELL+
+- OUT- → ESP32 GND
+- OUT- → MAX17043 CELL-
+- B+ → LiPo Battery +
+- B- → LiPo Battery -
+- IN+ → USB 5V or external power +
+- IN- → USB GND or external power -
+
+#### MAX17043 Connections:
+- VCC → 3.3V
+- GND → GND
+- SDA → GPIO32
+- SCL → GPIO22
+- ALERT → Not connected (optional interrupt pin)
+
+
 ## Telemetry Data
 
 The system transmits and displays the following data:
