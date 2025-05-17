@@ -48,14 +48,14 @@ The main page shows real-time telemetry data in an easy-to-read format:
 
 ```
 +------------------------------------------------------+
-| <                                                  > |
+| <              [===|] 85%                         > |
 | Alt:      123.4m               Battery: 3.70V 85%     |
 | Max Alt:  456.7m               Launch:  Waiting...    |
 | GPS:      12.34567,-12.34567   Temp:    25.1C        |
 | Staleness: 5s                  Max-G:   3.2g         |
+| Accel-V:  45.6 m/s             Baro-V:  44.2 m/s     |
 |                                TX Power: 10 dBm      |
-| Stats: 123 packets, 12 errors, SNR: 15.1dB           |
-|                                                       |
+| Stats: 123 pkts, 12 errs, SNR: 15.1dB               |
 +------------------------------------------------------+
 ```
 
@@ -65,7 +65,7 @@ The second page displays a real-time graph of altitude versus time, allowing use
 
 ```
 +------------------------------------------------------+
-| <           Altitude vs Time                       > |
+| <           [===|] 85%                            > |
 |                                                       |
 |    ^                                                  |
 |    |                                                  |
@@ -85,7 +85,7 @@ The third page shows a real-time graph of vertical speed versus time, calculated
 
 ```
 +------------------------------------------------------+
-| <           Speed vs Time                          > |
+| <           [===|] 85%                            > |
 |                                                       |
 |    ^                                                  |
 |    |                                                  |
@@ -96,6 +96,7 @@ The third page shows a real-time graph of vertical speed versus time, calculated
 | d  |___________/        \___                          |
 |    +---------------------------------------->         |
 |                      Time (s)                         |
+|    Accel-V: ---- Baro-V: ----                         |
 +------------------------------------------------------+
 ```
 
@@ -105,7 +106,7 @@ The fourth page displays the transmission power over time, showing how the adapt
 
 ```
 +------------------------------------------------------+
-| <           TX Power vs Time                       > |
+| <           [===|] 85%                            > |
 |                                                       |
 |    ^                                                  |
 |    |                                                  |
@@ -119,13 +120,61 @@ The fourth page displays the transmission power over time, showing how the adapt
 +------------------------------------------------------+
 ```
 
-### Page 5: Transmitter Selection
+### Page 5: Orientation Data
 
-The fifth page allows the user to select which transmitter to monitor when multiple rockets are in range:
+The fifth page shows the rocket's orientation and tilt information with a dynamic visualization of the rocket's current orientation:
 
 ```
 +------------------------------------------------------+
-| <           Select Transmitter                     > |
+| <           [===|] 85%                            > |
+|             Rocket Orientation                       |
+|                                                       |
+|    Tilt from vertical: 12.5°                         |
+|                                                       |
+|                    /\                                 |
+|                   /  \                                |
+|                  /    \                               |
+|                 /      \                              |
+|                /        \                             |
+|               /          \                            |
+|              /__________\                             |
+|                                                       |
+|    X-axis: 0.12   Y-axis: -0.24   Z-axis: 0.96        |
+|    Staleness: 5s                                     |
++------------------------------------------------------+
+```
+
+### Page 6: Last Known Positions
+
+The sixth page displays a list of last known GPS coordinates for all tracked transmitters:
+
+```
++------------------------------------------------------+
+| <           [===|] 85%                            > |
+|            Last Known Positions                      |
+|                                                       |
+|    Rocket Alpha                                      |
+|    Lat: 37.123456, Lng: -122.543210       [Clear]    |
+|    Dist: 1.2km, Bearing: 245° (SW)                   |
+|                                                       |
+|    Rocket Beta                                       |
+|    Lat: 37.234567, Lng: -122.654321       [Clear]    |
+|    Dist: 350m, Bearing: 78° (E)                      |
+|                                                       |
+|    Rocket Gamma                                      |
+|    Lat: 37.345678, Lng: -122.765432       [Clear]    |
+|    Dist: 2.5km, Bearing: 180° (S)                    |
+|                                                       |
++------------------------------------------------------+
+```
+
+### Page 7: Transmitter Selection
+
+The seventh page allows the user to select which transmitter to monitor when multiple rockets are in range:
+
+```
++------------------------------------------------------+
+| <           [===|] 85%                            > |
 |                                                       |
 |    Transmitter ID: 0xA1B2C3D4 (selected)             |
 |    Uptime: 00:15:32                                  |
@@ -161,31 +210,35 @@ struct GpsDataPacket {
 ### Altitude Packet (Type 0x02)
 ```c
 struct AltitudePacket {
-    uint8_t version;        // Protocol version (0x01)
-    uint8_t packetType;     // 0x02 for altitude data
+    uint8_t version;
+    uint8_t packetType;
     uint32_t transmitterId; // Unique ID of the transmitter
-    uint16_t currentAltitude; // Current altitude in meters
-    uint16_t maxAltitude;   // Maximum recorded altitude in meters
-    uint16_t temperature;   // Temperature in degrees C * 10
-    uint16_t maxG;          // Maximum G-force * 10
+    uint16_t currentAltitude;
+    uint16_t maxAltitude;
+    uint16_t temperature;
+    uint16_t maxG;
     int16_t accelVelocity;  // Velocity from accelerometer in cm/s
     int16_t baroVelocity;   // Velocity from barometer in cm/s
-    uint8_t checksum;       // XOR checksum of all previous bytes
+    int8_t orientationX;    // Current orientation vector X component * 127 (normalized)
+    int8_t orientationY;    // Current orientation vector Y component * 127 (normalized)
+    int8_t orientationZ;    // Current orientation vector Z component * 127 (normalized)
+    uint8_t checksum;
 };
 ```
 
 ### System Data Packet (Type 0x03)
 ```c
 struct SystemDataPacket {
-    uint8_t version;        // Protocol version (0x01)
+    uint8_t version;
     uint8_t packetType;     // 0x03 for system data
     uint32_t transmitterId; // Unique ID of the transmitter
     uint32_t uptime;        // Milliseconds since boot
-    uint16_t batteryMillivolts; // Battery voltage in millivolts
-    uint8_t batteryPercent; // Battery percentage (0-100)
+    uint16_t batteryMillivolts;
+    uint8_t batteryPercent;
     int8_t txPower;         // Current transmission power in dBm
     uint32_t bootTime;      // Boot time in seconds since epoch (from GPS)
-    uint8_t launchState;    // 0=waiting, 1=launched, 2=landed
+    uint8_t launchState;    // Current launch state (waiting, launched, landed)
+    uint8_t tiltAngle;      // Tilt angle from vertical in degrees * 2 (0.5 degree resolution)
     uint8_t checksum;       // XOR checksum of all previous bytes
 };
 ```

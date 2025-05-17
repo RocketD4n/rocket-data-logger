@@ -22,7 +22,7 @@ public:
     static const int MAX_TRANSMITTERS = 10;
     static const int MAX_NAME_LENGTH = 16;
     static const int MAX_DATA_POINTS = 100;
-    static const int NUM_PAGES = 6; // Main page + 3 graph pages + transmitter selection page + last positions page
+    static const int NUM_PAGES = 7; // Main page + 3 graph pages + orientation page + last positions page + transmitter selection page
     
     // Display layout constants
     static const int HEADER_HEIGHT = 30;
@@ -60,6 +60,8 @@ public:
     void updateMainPageValues();
     void drawGraphPage();
     void updateGraph();
+    void drawOrientationPage();
+    void updateOrientationData();
     void drawTransmitterSelectionPage();
     void drawLastPositionsPage();
     void drawKeyboard();
@@ -123,10 +125,26 @@ public:
     float currentLat = 0.0f;
     float currentLng = 0.0f;
     
-    // Last known position storage
+    // Orientation data
+    float orientationX = 0.0f;
+    float orientationY = 0.0f;
+    float orientationZ = 0.0f;
+    uint8_t tiltAngle = 0;
+    
+    // Position storage and calculations
     void saveLastKnownPosition(uint32_t transmitterId, float lat, float lng);
     void clearLastKnownPosition(uint32_t transmitterId);
     bool getLastKnownPosition(uint32_t transmitterId, float &lat, float &lng);
+    
+    // Launch position storage
+    void saveLaunchPosition(uint32_t transmitterId, float lat, float lng);
+    void clearLaunchPosition(uint32_t transmitterId);
+    bool getLaunchPosition(uint32_t transmitterId, float &lat, float &lng);
+    
+    // Distance and bearing calculations
+    float calculateDistance(float lat1, float lon1, float lat2, float lon2);
+    float calculateBearing(float lat1, float lon1, float lat2, float lon2);
+    String getBearingDirection(float bearing);
     
     // Buzzer control
     void setBuzzerActive(bool active) { buzzerActive = active; }
@@ -148,8 +166,8 @@ public:
     
     // Data update methods for different packet types
     void updateGpsData(float lat, float lng);
-    void updateAltitudeData(float altitude, float maxAlt, float temp, float maxG, float accelVelocity, float baroVelocity);
-    void updateSystemData(float battV, uint8_t battPct, int8_t txPwr, uint32_t uptime);
+    void updateAltitudeData(float altitude, float maxAlt, float temp, float maxG, float accelVelocity, float baroVelocity, float orientX, float orientY, float orientZ);
+    void updateSystemData(float battV, uint8_t battPct, int8_t txPwr, uint32_t uptime, uint8_t tiltAngle);
     void updateGraphData(float altitude, float speed, int8_t txPower);
     void addTransmitter(uint32_t transmitterId);
     void updateDisplay();

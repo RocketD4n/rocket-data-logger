@@ -238,9 +238,14 @@ void processAltitudePacket(uint8_t* buffer, size_t length) {
     float accelVelocity = packet->accelVelocity / 100.0f; // Convert from cm/s to m/s
     float baroVelocity = packet->baroVelocity / 100.0f; // Convert from cm/s to m/s
     
+    // Extract orientation data
+    float orientX = packet->orientationX / 127.0f; // Convert from int8_t to float (-1.0 to 1.0)
+    float orientY = packet->orientationY / 127.0f;
+    float orientZ = packet->orientationZ / 127.0f;
+    
     // Update altitude data using the specialized method
-    // Now using transmitted velocity values instead of calculating locally
-    display.updateAltitudeData(altitude, maxAlt, temp, maxG, accelVelocity, baroVelocity);
+    // Now using transmitted velocity values and orientation data
+    display.updateAltitudeData(altitude, maxAlt, temp, maxG, accelVelocity, baroVelocity, orientX, orientY, orientZ);
     
     // Log to SD card if available and altitude has changed by threshold amount
     if (sdCardAvailable && display.isRocketSelected() && transmitterId == display.getSelectedTransmitterId()) {
@@ -336,6 +341,7 @@ void processSystemPacket(uint8_t* buffer, size_t length) {
     int8_t txPwr = packet->txPower;
     uint32_t bootTime = packet->bootTime;
     uint8_t launchState = packet->launchState; // Get launch state from system packet
+    uint8_t tiltAngle = packet->tiltAngle; // Get tilt angle from system packet
     
     // Store rocket boot time for log file naming
     if (rocketBootTime == 0 && bootTime > 0) {
@@ -350,7 +356,7 @@ void processSystemPacket(uint8_t* buffer, size_t length) {
     }
     
     // Update system data using the specialized method
-    display.updateSystemData(battV, battPct, txPwr, uptime);
+    display.updateSystemData(battV, battPct, txPwr, uptime, tiltAngle);
     
     // Update launch state
     display.launchState = launchState;

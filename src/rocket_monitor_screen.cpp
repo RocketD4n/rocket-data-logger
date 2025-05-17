@@ -169,6 +169,11 @@ void RocketMonitorScreen::updateGpsData(float lat, float lng) {
     // Save last known position if we have a valid GPS fix
     if (lat != 0.0f && lng != 0.0f && selectedTransmitterId != 0) {
         saveLastKnownPosition(selectedTransmitterId, lat, lng);
+        
+        // If the rocket is in pre-launch state, save this as the launch position
+        if (launchState == LAUNCH_STATE_WAITING) {
+            saveLaunchPosition(selectedTransmitterId, lat, lng);
+        }
     }
     
     // Update last packet time
@@ -177,7 +182,7 @@ void RocketMonitorScreen::updateGpsData(float lat, float lng) {
 }
 
 // Update altitude data
-void RocketMonitorScreen::updateAltitudeData(float altitude, float maxAlt, float temp, float maxG, float accelVelocity, float baroVelocity) {
+void RocketMonitorScreen::updateAltitudeData(float altitude, float maxAlt, float temp, float maxG, float accelVelocity, float baroVelocity, float orientX, float orientY, float orientZ) {
     currentAltitude = altitude;
     maxAltitude = maxAlt;
     temperature = temp;
@@ -190,6 +195,11 @@ void RocketMonitorScreen::updateAltitudeData(float altitude, float maxAlt, float
     // Store barometric velocity for potential display or comparison
     this->baroVelocity = baroVelocity;
     
+    // Store orientation data
+    orientationX = orientX;
+    orientationY = orientY;
+    orientationZ = orientZ;
+    
     // Update last packet time
     lastPacketTime = millis();
     packetCount++;
@@ -199,11 +209,12 @@ void RocketMonitorScreen::updateAltitudeData(float altitude, float maxAlt, float
 }
 
 // Update system data
-void RocketMonitorScreen::updateSystemData(float battV, uint8_t battPct, int8_t txPwr, uint32_t uptime) {
+void RocketMonitorScreen::updateSystemData(float battV, uint8_t battPct, int8_t txPwr, uint32_t uptime, uint8_t tiltAng) {
     batteryVoltage = battV;
     batteryPercent = battPct;
     txPower = txPwr;
     rocketUptime = uptime;
+    tiltAngle = tiltAng;
     
     // Update last packet time
     lastPacketTime = millis();
@@ -870,11 +881,17 @@ void RocketMonitorScreen::updateDisplay() {
         case 3: // TX Power graph
             drawGraphPage();
             break;
-        case 4: // Transmitter selection page
+        case 4: // Orientation page
+            drawOrientationPage();
+            break;
+        case 5: // Last positions page
+            drawLastPositionsPage();
+            break;
+        case 6: // Transmitter selection page
             drawTransmitterSelectionPage();
             break;
-        case 5: // Last known positions page
-            drawLastPositionsPage();
+        default:
+            drawMainPage();
             break;
     }
 }
@@ -950,6 +967,128 @@ bool RocketMonitorScreen::getLastKnownPosition(uint32_t transmitterId, float &la
     return (lat != 0.0f && lng != 0.0f);
 }
 
+// Draw the orientation data page
+void RocketMonitorScreen::drawOrientationPage() {
+    // Clear screen
+    tft.fillScreen(TFT_BLACK);
+    
+    // Draw page title
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_WHITE);
+    tft.setCursor(80, 10);
+    tft.print("Rocket Orientation");
+    
+    // Draw navigation buttons
+    drawNavigationButtons(rocketSelected);
+    
+    // Draw battery indicator
+    drawBatteryIndicator(batteryPercent);
+    
+    // Draw tilt angle
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_YELLOW);
+    tft.setCursor(20, 50);
+    tft.print("Tilt from vertical:");
+    
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_WHITE);
+    tft.setCursor(180, 50);
+    // Convert from 0.5 degree resolution back to float
+    float tiltDegrees = tiltAngle * 0.5f;
+    tft.print(tiltDegrees, 1);
+    tft.print("\xB0"); // Degree symbol
+    
+    // Draw rocket diagram
+    int centerX = tft.width() / 2;
+    int centerY = tft.height() / 2 + 10;
+    int rocketHeight = 80;
+    int rocketWidth = 30;
+    
+    // Calculate rocket tilt based on orientation data
+    float tiltRadians = tiltDegrees * PI / 180.0f;
+    
+    // Draw rocket body (tilted)
+    int tipX = centerX - sin(tiltRadians) * rocketHeight / 2;
+    int tipY = centerY - cos(tiltRadians) * rocketHeight / 2;
+    int baseX = centerX + sin(tiltRadians) * rocketHeight / 2;
+    int baseY = centerY + cos(tiltRadians) * rocketHeight / 2;
+    
+    // Draw rocket body
+    tft.drawLine(tipX, tipY, baseX, baseY, TFT_WHITE);
+    
+    // Draw rocket tip (triangle)
+    int tipSize = 10;
+    int tipX1 = tipX - cos(tiltRadians) * tipSize / 2;
+    int tipY1 = tipY + sin(tiltRadians) * tipSize / 2;
+    int tipX2 = tipX + cos(tiltRadians) * tipSize / 2;
+    int tipY2 = tipY - sin(tiltRadians) * tipSize / 2;
+    
+    tft.fillTriangle(tipX, tipY, tipX1, tipY1, tipX2, tipY2, TFT_WHITE);
+    
+    // Draw fins
+    int finSize = 15;
+    int finX1 = baseX - cos(tiltRadians) * finSize;
+    int finY1 = baseY + sin(tiltRadians) * finSize;
+    int finX2 = baseX + cos(tiltRadians) * finSize;
+    int finY2 = baseY - sin(tiltRadians) * finSize;
+    int finOffset = 20;
+    int finBaseX1 = baseX - sin(tiltRadians) * finOffset;
+    int finBaseY1 = baseY - cos(tiltRadians) * finOffset;
+    int finBaseX2 = baseX - sin(tiltRadians) * (finOffset - 10);
+    int finBaseY2 = baseY - cos(tiltRadians) * (finOffset - 10);
+    
+    tft.drawLine(finBaseX1, finBaseY1, finX1, finY1, TFT_WHITE);
+    tft.drawLine(finBaseX2, finBaseY2, finX2, finY2, TFT_WHITE);
+    
+    // Draw orientation vector values
+    tft.setTextSize(1);
+    tft.setCursor(20, tft.height() - 30);
+    tft.setTextColor(TFT_YELLOW);
+    tft.print("X-axis: ");
+    tft.setTextColor(TFT_WHITE);
+    tft.print(orientationX, 2);
+    
+    tft.setCursor(110, tft.height() - 30);
+    tft.setTextColor(TFT_YELLOW);
+    tft.print("Y-axis: ");
+    tft.setTextColor(TFT_WHITE);
+    tft.print(orientationY, 2);
+    
+    tft.setCursor(200, tft.height() - 30);
+    tft.setTextColor(TFT_YELLOW);
+    tft.print("Z-axis: ");
+    tft.setTextColor(TFT_WHITE);
+    tft.print(orientationZ, 2);
+    
+    // Draw staleness indicator
+    unsigned long timeSinceLastPacket = millis() - lastPacketTime;
+    tft.setTextSize(1);
+    tft.setCursor(10, tft.height() - 15);
+    tft.setTextColor(TFT_YELLOW);
+    tft.print("Staleness: ");
+    tft.setTextColor(timeSinceLastPacket > 10000 ? TFT_RED : TFT_WHITE);
+    tft.print(timeSinceLastPacket / 1000);
+    tft.print("s");
+}
+
+// Update orientation data display
+void RocketMonitorScreen::updateOrientationData() {
+    // Only update the dynamic parts of the orientation page
+    if (currentPage == 4) { // Orientation page
+        // Update tilt angle
+        tft.fillRect(180, 50, 100, 20, TFT_BLACK);
+        tft.setTextSize(2);
+        tft.setTextColor(TFT_WHITE);
+        tft.setCursor(180, 50);
+        float tiltDegrees = tiltAngle * 0.5f;
+        tft.print(tiltDegrees, 1);
+        tft.print("\xB0"); // Degree symbol
+        
+        // Redraw the entire orientation display since it's complex
+        drawOrientationPage();
+    }
+}
+
 // Draw the last known positions page
 void RocketMonitorScreen::drawLastPositionsPage() {
     // Clear screen
@@ -993,14 +1132,39 @@ void RocketMonitorScreen::drawLastPositionsPage() {
             sprintf(coordStr, "Lat: %0.6f, Lng: %0.6f", lat, lng);
             tft.drawString(coordStr, 10, yPos + 20, 2);
             
+            // Check if we have a launch position for this transmitter
+            float launchLat, launchLng;
+            if (getLaunchPosition(id, launchLat, launchLng)) {
+                // Calculate distance and bearing from launch position
+                float distance = calculateDistance(launchLat, launchLng, lat, lng);
+                float bearing = calculateBearing(launchLat, launchLng, lat, lng);
+                String direction = getBearingDirection(bearing);
+                
+                // Format distance (convert to meters if less than 1km)
+                String distStr;
+                if (distance < 1.0f) {
+                    distStr = String(distance * 1000.0f, 0) + "m";
+                } else {
+                    distStr = String(distance, 2) + "km";
+                }
+                
+                // Draw distance and bearing information
+                char navStr[50];
+                sprintf(navStr, "Dist: %s, Bearing: %.0f° (%s)", distStr.c_str(), bearing, direction.c_str());
+                tft.drawString(navStr, 10, yPos + 40, 2);
+                
+                // Adjust vertical position for the additional line
+                yPos += 80;
+            } else {
+                yPos += 60;
+            }
+            
             // Draw clear button
-            tft.fillRoundRect(tft.width() - 60, yPos + 5, 50, 30, 5, TFT_RED);
+            tft.fillRoundRect(tft.width() - 60, yPos - 55, 50, 30, 5, TFT_RED);
             tft.setTextColor(TFT_WHITE, TFT_RED);
             tft.setTextDatum(MC_DATUM); // Middle center
-            tft.drawString("Clear", tft.width() - 35, yPos + 20, 2);
+            tft.drawString("Clear", tft.width() - 35, yPos - 40, 2);
             tft.setTextDatum(TL_DATUM); // Back to top left
-            
-            yPos += 60;
             count++;
         }
     }
@@ -1028,4 +1192,120 @@ void RocketMonitorScreen::drawLowBattery() {
     
     // Reset text alignment
     tft.setTextDatum(TL_DATUM);
+}
+
+// Save launch position for a transmitter
+void RocketMonitorScreen::saveLaunchPosition(uint32_t transmitterId, float lat, float lng) {
+    if (transmitterId == 0 || lat == 0.0f || lng == 0.0f) {
+        return; // Don't save invalid positions
+    }
+    
+    lastPositionsStorage.begin("launchpos", false);
+    
+    // Create keys for this transmitter
+    String idStr = String(transmitterId, HEX);
+    String latKey = "lat_" + idStr;
+    String lngKey = "lng_" + idStr;
+    String timeKey = "time_" + idStr;
+    
+    // Save position and current time
+    lastPositionsStorage.putFloat(latKey.c_str(), lat);
+    lastPositionsStorage.putFloat(lngKey.c_str(), lng);
+    lastPositionsStorage.putULong(timeKey.c_str(), millis());
+    
+    lastPositionsStorage.end();
+}
+
+// Clear launch position for a transmitter
+void RocketMonitorScreen::clearLaunchPosition(uint32_t transmitterId) {
+    if (transmitterId == 0) {
+        return;
+    }
+    
+    lastPositionsStorage.begin("launchpos", false);
+    
+    // Create keys for this transmitter
+    String idStr = String(transmitterId, HEX);
+    String latKey = "lat_" + idStr;
+    String lngKey = "lng_" + idStr;
+    String timeKey = "time_" + idStr;
+    
+    // Remove position data
+    lastPositionsStorage.remove(latKey.c_str());
+    lastPositionsStorage.remove(lngKey.c_str());
+    lastPositionsStorage.remove(timeKey.c_str());
+    
+    lastPositionsStorage.end();
+}
+
+// Get launch position for a transmitter
+bool RocketMonitorScreen::getLaunchPosition(uint32_t transmitterId, float &lat, float &lng) {
+    if (transmitterId == 0) {
+        return false;
+    }
+    
+    lastPositionsStorage.begin("launchpos", true); // Read-only mode
+    
+    // Create keys for this transmitter
+    String idStr = String(transmitterId, HEX);
+    String latKey = "lat_" + idStr;
+    String lngKey = "lng_" + idStr;
+    
+    // Check if we have position data for this transmitter
+    if (!lastPositionsStorage.isKey(latKey.c_str()) || !lastPositionsStorage.isKey(lngKey.c_str())) {
+        lastPositionsStorage.end();
+        return false;
+    }
+    
+    // Get position data
+    lat = lastPositionsStorage.getFloat(latKey.c_str(), 0.0f);
+    lng = lastPositionsStorage.getFloat(lngKey.c_str(), 0.0f);
+    
+    lastPositionsStorage.end();
+    return (lat != 0.0f && lng != 0.0f);
+}
+
+// Calculate distance between two GPS coordinates in kilometers
+float RocketMonitorScreen::calculateDistance(float lat1, float lon1, float lat2, float lon2) {
+    // Convert degrees to radians
+    float lat1Rad = lat1 * PI / 180.0f;
+    float lon1Rad = lon1 * PI / 180.0f;
+    float lat2Rad = lat2 * PI / 180.0f;
+    float lon2Rad = lon2 * PI / 180.0f;
+    
+    // Haversine formula
+    float dlon = lon2Rad - lon1Rad;
+    float dlat = lat2Rad - lat1Rad;
+    float a = pow(sin(dlat/2), 2) + cos(lat1Rad) * cos(lat2Rad) * pow(sin(dlon/2), 2);
+    float c = 2 * atan2(sqrt(a), sqrt(1-a));
+    float distance = 6371.0f * c; // Earth radius in km
+    
+    return distance;
+}
+
+// Calculate bearing between two GPS coordinates in degrees
+float RocketMonitorScreen::calculateBearing(float lat1, float lon1, float lat2, float lon2) {
+    // Convert degrees to radians
+    float lat1Rad = lat1 * PI / 180.0f;
+    float lon1Rad = lon1 * PI / 180.0f;
+    float lat2Rad = lat2 * PI / 180.0f;
+    float lon2Rad = lon2 * PI / 180.0f;
+    
+    // Calculate bearing
+    float y = sin(lon2Rad - lon1Rad) * cos(lat2Rad);
+    float x = cos(lat1Rad) * sin(lat2Rad) - sin(lat1Rad) * cos(lat2Rad) * cos(lon2Rad - lon1Rad);
+    float bearing = atan2(y, x) * 180.0f / PI;
+    
+    // Normalize to 0-360 degrees
+    bearing = fmod((bearing + 360.0f), 360.0f);
+    
+    return bearing;
+}
+
+// Convert bearing to cardinal direction
+String RocketMonitorScreen::getBearingDirection(float bearing) {
+    const char* directions[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW", "N"};
+    int index = round(bearing / 45.0f);
+    if (index > 8) index = 0;
+    return directions[index];
 }

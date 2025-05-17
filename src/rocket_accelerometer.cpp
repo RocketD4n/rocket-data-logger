@@ -9,6 +9,7 @@ RocketAccelerometer::RocketAccelerometer() :
     lastBaroReadTime(0),
     lastAltitudeForVelocity(0.0f),
     maxG(0.0f),
+    tiltAngle(0.0f),
     pLaunchDetected(nullptr),
     pLandedDetected(nullptr)
 {
@@ -93,7 +94,12 @@ void RocketAccelerometer::calibrate(const char* filename_base) {
     accelBias[2] = avgZ - (gravityVector[2] * 9.8f);
     
     // Calculate tilt angle from vertical (in degrees)
-    float tiltAngle = acos(rocketAxis[2]) * 180.0f / PI;
+    tiltAngle = acos(rocketAxis[2]) * 180.0f / PI;
+    
+    // Initialize current orientation to the calibrated rocket axis
+    currentOrientation[0] = rocketAxis[0];
+    currentOrientation[1] = rocketAxis[1];
+    currentOrientation[2] = rocketAxis[2];
     
     Serial.println("Accelerometer calibration complete.");
     Serial.print("Bias X: "); Serial.print(accelBias[0]);
@@ -213,6 +219,16 @@ void RocketAccelerometer::updateVelocity(sensors_event_t& accel) {
         maxG = currentG;
     }
     
+    // Update current orientation if we're in flight and have significant acceleration
+    // This helps track orientation changes during flight
+    if (pLaunchDetected != nullptr && *pLaunchDetected && accelMagnitude > 2.0f * 9.8f) {
+        // Normalize the acceleration vector to get the current orientation
+        float normFactor = 1.0f / accelMagnitude;
+        currentOrientation[0] = accelX * normFactor;
+        currentOrientation[1] = accelY * normFactor;
+        currentOrientation[2] = accelZ * normFactor;
+    }
+    
     // Reset velocity to zero if we're not in flight and not moving much
     // This helps prevent drift when the rocket is stationary
     if ((pLaunchDetected == nullptr || !(*pLaunchDetected)) && abs(accelAlongAxis) < 0.5f) {
@@ -279,4 +295,14 @@ void RocketAccelerometer::resetMaxValues() {
     maxAccelVelocity = 0.0f;
     maxBaroVelocity = 0.0f;
     maxG = 0.0f;
+}
+
+float RocketAccelerometer::getTiltAngle() const {
+    return tiltAngle;
+}
+
+void RocketAccelerometer::getCurrentOrientation(float& x, float& y, float& z) const {
+    x = currentOrientation[0];
+    y = currentOrientation[1];
+    z = currentOrientation[2];
 }

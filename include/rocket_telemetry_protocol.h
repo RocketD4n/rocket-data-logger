@@ -56,6 +56,9 @@ struct AltitudePacket {
     uint16_t maxG;
     int16_t accelVelocity;   // Velocity from accelerometer integration (cm/s)
     int16_t baroVelocity;    // Velocity from barometric calculation (cm/s)
+    int8_t orientationX;     // Current orientation vector X component * 127 (normalized)
+    int8_t orientationY;     // Current orientation vector Y component * 127 (normalized)
+    int8_t orientationZ;     // Current orientation vector Z component * 127 (normalized)
     uint8_t checksum;
 };
 
@@ -70,6 +73,7 @@ struct SystemDataPacket {
     int8_t txPower;         // Current transmission power in dBm
     uint32_t bootTime;      // Boot time in seconds since epoch (from GPS)
     uint8_t launchState;    // Current launch state (waiting, launched, landed)
+    uint8_t tiltAngle;      // Tilt angle from vertical in degrees * 2 (0.5 degree resolution)
     uint8_t checksum;
 };
 

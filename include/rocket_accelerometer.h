@@ -29,6 +29,11 @@ public:
     float getMaxBaroVelocity() const { return maxBaroVelocity; }
     float getMaxG() const { return maxG; }
     
+    // Orientation getters
+    float getTiltAngle() const; // Returns tilt angle in degrees
+    void getCurrentOrientation(float& x, float& y, float& z) const; // Gets current orientation vector
+    uint8_t getTiltAngleInt() const { return (uint8_t)(getTiltAngle() * 2); } // Returns tilt angle * 2 as uint8_t (0.5 degree resolution)
+    
     // Reset maximum values
     void resetMaxValues();
     
@@ -47,17 +52,17 @@ private:
     float maxBaroVelocity;    // Maximum barometer-based velocity
     unsigned long lastAccelReadTime;
     unsigned long lastBaroReadTime;
+    float lastAltitudeForVelocity;    // Last altitude reading for baro velocity calc
+    float maxG;               // Maximum G-force experienced
+    
+    // Bias and orientation variables
     float accelBias[3];       // Bias offsets for x, y, z
-    float lastAltitudeForVelocity; // Last altitude reading for baro velocity calc
+    float rocketAxis[3];      // Rocket's vertical axis (normalized)
+    float gravityVector[3];   // Gravity vector in sensor frame (normalized)
+    float tiltAngle;          // Tilt angle from vertical in degrees
+    float currentOrientation[3]; // Current orientation vector (updated during flight)
     
-    // Orientation estimation variables
-    float rocketAxis[3];      // Rocket's vertical axis
-    float gravityVector[3];   // Gravity vector in sensor frame
-    
-    // Maximum G-force
-    float maxG;
-    
-    // Launch detection state (passed from main program)
+    // Launch detection pointers
     bool* pLaunchDetected;
     bool* pLandedDetected;
     

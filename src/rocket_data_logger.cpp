@@ -353,6 +353,9 @@ void sendSystemData() {
     packet.launchState = LAUNCH_STATE_WAITING;    // Pre-launch
   }
   
+  // Include tilt angle from calibration (0.5 degree resolution)
+  packet.tiltAngle = accel.getTiltAngleInt();
+  
   packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
   
   radio->transmit((uint8_t*)&packet, sizeof(SystemDataPacket));
@@ -376,8 +379,15 @@ void sendAltitudeData() {
   packet.maxG = accel.getMaxG() * 10; // Store with 0.1g precision
   packet.accelVelocity = (int16_t)(accel.getAccelVelocity() * 100); // Store in cm/s
   packet.baroVelocity = (int16_t)(accel.getBaroVelocity() * 100); // Store in cm/s
-
-  // Launch state is now in the SystemDataPacket, not in AltitudePacket
+  
+  // Get current orientation vector
+  float orientX, orientY, orientZ;
+  accel.getCurrentOrientation(orientX, orientY, orientZ);
+  
+  // Scale to int8_t range (-127 to 127)
+  packet.orientationX = (int8_t)(orientX * 127.0f);
+  packet.orientationY = (int8_t)(orientY * 127.0f);
+  packet.orientationZ = (int8_t)(orientZ * 127.0f);
 
   
   packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
