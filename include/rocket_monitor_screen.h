@@ -136,6 +136,10 @@ public:
     float currentLat = 0.0f;
     float currentLng = 0.0f;
     
+    // Frequency information
+    float rocketFrequency[MAX_TRANSMITTERS] = {0.0f}; // Operating frequency in MHz
+    uint8_t radioType[MAX_TRANSMITTERS] = {0}; // 0=CC1101, 1=SX1278, 2=SX1262
+    
     // Orientation data
     float orientationX = 0.0f;
     float orientationY = 0.0f;
@@ -175,12 +179,31 @@ public:
     bool buzzerActive = false;
     bool abortSent = false;
     
+    // Rescan and connection status
+    bool rescanRequested = false;
+    bool isRescanRequested() const { return rescanRequested; }
+    void clearRescanRequest() { rescanRequested = false; }
+    
+    // Check if we need to auto-rescan due to lost connection
+    bool checkConnectionTimeout() {
+        // If no data received for 10 seconds, trigger auto-rescan
+        if (lastPacketTime > 0 && millis() - lastPacketTime > 10000) {
+            return true;
+        }
+        return false;
+    }
+    
     // Data update methods for different packet types
     void updateGpsData(float lat, float lng);
     void updateAltitudeData(float altitude, float maxAlt, float temp, float maxG, float accelVelocity, float baroVelocity, float orientX, float orientY, float orientZ);
     void updateSystemData(float battV, uint8_t battPct, int8_t txPwr, uint32_t uptime, uint8_t tiltAngle);
     void updateGraphData(float altitude, float speed, int8_t txPower);
     void addTransmitter(uint32_t transmitterId);
+    void setTransmitterFrequency(uint32_t transmitterId, float frequency, uint8_t radioType);
+    float getTransmitterFrequency(uint32_t transmitterId) const;
+    uint8_t getTransmitterRadioType(uint32_t transmitterId) const;
+    bool isFrequencyAcknowledged(uint32_t transmitterId) const;
+    void setFrequencyAcknowledged(uint32_t transmitterId, bool acknowledged);
     void updateDisplay();
     
 
@@ -202,6 +225,7 @@ private:
     int numTransmitters = 0;
     int selectedTransmitterIndex = -1; // -1 means no transmitter selected
     uint32_t selectedTransmitterId = 0;
+    bool frequencyAcknowledged[MAX_TRANSMITTERS] = {false}; // Whether we've acknowledged the frequency for each transmitter
     
     // Graph data history
     float dataHistory[3][MAX_DATA_POINTS]; // 0=altitude, 1=speed, 2=txPower

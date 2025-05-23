@@ -180,16 +180,81 @@ The seventh page allows the user to select which transmitter to monitor when mul
 |                                                       |
 |    Transmitter ID: 0xA1B2C3D4 (selected)             |
 |    Uptime: 00:15:32                                  |
+|    Frequency: 863.5 MHz (SX1262)                     |
 |                                                       |
 |    Transmitter ID: 0xE5F6G7H8                        |
 |    Uptime: 00:05:12                                  |
+|    Frequency: 433.2 MHz (SX1278)                     |
 |                                                       |
 |    Transmitter ID: 0xI9J0K1L2                        |
 |    Uptime: 00:23:45                                  |
+|    Frequency: 434.0 MHz (CC1101)                     |
 |                                                       |
 |    Tap an ID to select that transmitter              |
 |                                                       |
 +------------------------------------------------------+
+```
+
+## Dynamic Frequency Selection
+
+The system implements dynamic frequency selection to optimize communication reliability and avoid interference:
+
+### Frequency Scanning
+
+1. **Automatic Channel Selection**:
+   - Each radio module can scan its supported frequency range to find the clearest channel
+   - SX1262: 862-870 MHz band (default announcement at 863.0 MHz)
+   - SX1278 and CC1101: 433-435 MHz band (default announcement at 433.0 MHz)
+
+2. **Scanning Process**:
+   - Samples RSSI (Received Signal Strength Indicator) across the frequency range
+   - Takes multiple samples per frequency to ensure accuracy
+   - Selects the frequency with the lowest RSSI (least interference)
+   - Configures the radio to operate on the selected frequency
+
+3. **Frequency Announcement**:
+   - Transmitter broadcasts its operating frequency after selection
+   - Receiver acknowledges the frequency and tunes to match
+   - Allows multiple rockets to operate on different frequencies simultaneously
+
+4. **Auto-Rescan and Connection Monitoring**:
+   - Receiver automatically detects when connection is lost (no data for 10 seconds)
+   - Switches back to announcement frequency to search for the rocket again
+   - Manual rescan button on transmitter selection page for user-initiated rescans
+   - Handles rocket restarts and frequency changes automatically
+
+### Frequency Control Packets
+
+```c
+struct FrequencyAnnouncePacket {
+    uint8_t version;        // Protocol version
+    uint8_t packetType;     // 0xF0 for frequency announcement
+    uint32_t transmitterId; // Unique ID of the transmitter
+    uint32_t frequency;     // Operating frequency in kHz
+    uint8_t radioType;      // Type of radio (0=SX1262, 1=SX1278, 2=CC1101)
+    uint8_t checksum;       // XOR checksum of all previous bytes
+};
+
+struct FrequencyAckPacket {
+    uint8_t version;        // Protocol version
+    uint8_t packetType;     // 0xF1 for frequency acknowledgment
+    uint32_t transmitterId; // Transmitter ID this ack is for
+    uint32_t frequency;     // Acknowledged frequency in kHz
+    uint8_t checksum;       // XOR checksum of all previous bytes
+};
+```
+
+### Command Packets
+
+```c
+struct CommandPacket {
+    uint8_t version;        // Protocol version
+    uint8_t packetType;     // 0xF2 for command packets
+    uint8_t subType;        // Command type (e.g., 0x01 for buzzer control)
+    uint32_t transmitterId; // Target transmitter ID
+    uint8_t commandParam;   // Command parameter
+    uint8_t checksum;       // XOR checksum of all previous bytes
+};
 ```
 
 ## Telemetry Protocol

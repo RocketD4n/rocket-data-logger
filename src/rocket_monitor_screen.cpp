@@ -135,26 +135,78 @@ bool RocketMonitorScreen::isTouchInButton(uint16_t x, uint16_t y, uint16_t btnX,
 
 // Add a new transmitter to the list
 void RocketMonitorScreen::addTransmitter(uint32_t transmitterId) {
-    // Check if this is a new transmitter
-    bool isNewTransmitter = true;
+    // Check if transmitter already exists
     for (int i = 0; i < numTransmitters; i++) {
         if (knownTransmitters[i] == transmitterId) {
-            isNewTransmitter = false;
-            break;
+            return; // Already in the list
         }
     }
     
-    // Add to known transmitters if new
-    if (isNewTransmitter && numTransmitters < MAX_TRANSMITTERS) {
+    // Add new transmitter if there's space
+    if (numTransmitters < MAX_TRANSMITTERS) {
         knownTransmitters[numTransmitters] = transmitterId;
+        rocketNames[numTransmitters] = String(transmitterId, HEX); // Default name is the ID in hex
+        rocketFrequency[numTransmitters] = 0.0f; // Initialize frequency to 0
+        radioType[numTransmitters] = 2; // Default to SX1262
+        frequencyAcknowledged[numTransmitters] = false; // Initialize to not acknowledged
         numTransmitters++;
         
         // If this is the first transmitter, select it automatically
         if (numTransmitters == 1) {
             selectedTransmitterIndex = 0;
             selectedTransmitterId = transmitterId;
-            rocketSelected = true;  
-            updateDisplay();
+            rocketSelected = true;
+        }
+        
+        // Redraw the transmitter selection page if we're on it
+        if (currentPage == PAGE_TRANSMITTER_SELECTION) {
+            drawTransmitterSelectionPage();
+        }
+    }
+}
+
+void RocketMonitorScreen::setTransmitterFrequency(uint32_t transmitterId, float frequency, uint8_t radioType) {
+    for (int i = 0; i < numTransmitters; i++) {
+        if (knownTransmitters[i] == transmitterId) {
+            rocketFrequency[i] = frequency;
+            this->radioType[i] = radioType;
+            return;
+        }
+    }
+}
+
+float RocketMonitorScreen::getTransmitterFrequency(uint32_t transmitterId) const {
+    for (int i = 0; i < numTransmitters; i++) {
+        if (knownTransmitters[i] == transmitterId) {
+            return rocketFrequency[i];
+        }
+    }
+    return 0.0f; // Default if not found
+}
+
+uint8_t RocketMonitorScreen::getTransmitterRadioType(uint32_t transmitterId) const {
+    for (int i = 0; i < numTransmitters; i++) {
+        if (knownTransmitters[i] == transmitterId) {
+            return radioType[i];
+        }
+    }
+    return 2; // Default to SX1262 if not found
+}
+
+bool RocketMonitorScreen::isFrequencyAcknowledged(uint32_t transmitterId) const {
+    for (int i = 0; i < numTransmitters; i++) {
+        if (knownTransmitters[i] == transmitterId) {
+            return frequencyAcknowledged[i];
+        }
+    }
+    return false; // Default if not found
+}
+
+void RocketMonitorScreen::setFrequencyAcknowledged(uint32_t transmitterId, bool acknowledged) {
+    for (int i = 0; i < numTransmitters; i++) {
+        if (knownTransmitters[i] == transmitterId) {
+            frequencyAcknowledged[i] = acknowledged;
+            return;
         }
     }
 }
@@ -539,6 +591,18 @@ void RocketMonitorScreen::drawTransmitterSelectionPage() {
     tft.drawString("Select Rocket", tft.width()/2, 35, 2);
     tft.setTextDatum(TL_DATUM); // Reset to top left
     
+    // Draw rescan button
+    const int rescanBtnWidth = 100;
+    const int rescanBtnHeight = 30;
+    const int rescanBtnX = (tft.width() - rescanBtnWidth) / 2;
+    const int rescanBtnY = tft.height() - rescanBtnHeight - 10;
+    
+    tft.fillRoundRect(rescanBtnX, rescanBtnY, rescanBtnWidth, rescanBtnHeight, 5, TFT_BLUE);
+    tft.setTextColor(TFT_WHITE);
+    tft.setTextDatum(MC_DATUM); // Middle center
+    tft.drawString("RESCAN", rescanBtnX + rescanBtnWidth/2, rescanBtnY + rescanBtnHeight/2, 2);
+    tft.setTextDatum(TL_DATUM); // Reset to top left
+    
     // If keyboard is showing, draw it
     if (showKeyboard) {
         drawKeyboard();
@@ -556,7 +620,7 @@ void RocketMonitorScreen::drawTransmitterSelectionPage() {
     
     // Draw list of transmitters
     const int startY = 60;
-    const int itemHeight = 30;
+    const int itemHeight = 40; // Increased height for more info
     const int nameButtonWidth = 50;
     
     for (int i = 0; i < numTransmitters; i++) {
@@ -573,6 +637,29 @@ void RocketMonitorScreen::drawTransmitterSelectionPage() {
         
         // Draw the text
         tft.drawString(displayText, 20, startY + i * itemHeight);
+        
+        // Draw frequency information
+        String freqStr;
+        if (rocketFrequency[i] > 0.0f) {
+            // Determine radio type text
+            String radioTypeStr;
+            switch (radioType[i]) {
+                case 0: radioTypeStr = "CC1101"; break;
+                case 1: radioTypeStr = "SX1278"; break;
+                case 2: radioTypeStr = "SX1262"; break;
+                default: radioTypeStr = "Unknown";
+            }
+            
+            freqStr = String(rocketFrequency[i], 3) + " MHz (" + radioTypeStr + ")";
+            uint16_t freqColor = frequencyAcknowledged[i] ? TFT_GREEN : TFT_YELLOW;
+            tft.setTextColor(freqColor, TFT_BLACK);
+            tft.drawString(freqStr, 20, startY + i * itemHeight + 16);
+            tft.setTextColor(color, TFT_BLACK); // Restore color
+        } else {
+            tft.setTextColor(TFT_RED, TFT_BLACK);
+            tft.drawString("Waiting for frequency...", 20, startY + i * itemHeight + 16);
+            tft.setTextColor(color, TFT_BLACK); // Restore color
+        }
         
         // Draw uptime if available
         if (i == selectedTransmitterIndex) {
@@ -775,6 +862,28 @@ bool RocketMonitorScreen::handleTouch(int x, int y) {
             break;
             
         case PAGE_TRANSMITTER_SELECTION:
+        {
+            // Check for rescan button
+            const int rescanBtnWidth = 100;
+            const int rescanBtnHeight = 30;
+            const int rescanBtnX = (tft.width() - rescanBtnWidth) / 2;
+            const int rescanBtnY = tft.height() - rescanBtnHeight - 10;
+            
+            if (isTouchInButton(x, y, rescanBtnX, rescanBtnY, rescanBtnWidth, rescanBtnHeight)) {
+                // Trigger rescan - this will be handled by the main loop
+                rescanRequested = true;
+                
+                // Clear existing transmitter list
+                numTransmitters = 0;
+                selectedTransmitterIndex = -1;
+                selectedTransmitterId = 0;
+                rocketSelected = false;
+                
+                // Redraw the page with "Searching..." message
+                drawTransmitterSelectionPage();
+                return true;
+            }
+            
             // Check for transmitter selection
             for (int i = 0; i < numTransmitters; i++) {
                 int yPos = 50 + i * 40;
@@ -791,8 +900,10 @@ bool RocketMonitorScreen::handleTouch(int x, int y) {
                 }
             }
             break;
+        }
             
         case PAGE_LAST_POSITIONS:
+        {
             // Check for clear buttons
             int yPos = 50;
             for (int i = 0; i < numTransmitters; i++) {
@@ -814,6 +925,7 @@ bool RocketMonitorScreen::handleTouch(int x, int y) {
                 }
             }
             break;
+        }
     }
     
     return false;

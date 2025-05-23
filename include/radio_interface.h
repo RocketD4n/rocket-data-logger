@@ -13,6 +13,7 @@ protected:
     float lastReceivedSnr = 0.0f;
     unsigned long lastPowerAdjustTime = 0;
     float currentPower = 10.0f;
+    float operatingFrequency = 433.0f; // Default operating frequency
     
     // Local transmitter ID
     uint32_t transmitterId = 0;
@@ -137,6 +138,81 @@ public:
     
     // Get maximum power level supported by this radio (in dBm)
     virtual float getMaximumPower() = 0;
+    
+    // Structure to store frequency scan results
+    struct FreqScanResult {
+        float frequency;
+        float rssi;
+    };
+    
+    // Scan frequency range to find a clear channel
+    // Returns the best frequency found (in MHz)
+    // minFreq and maxFreq are in MHz, stepSize is in kHz
+    // samplesPerFreq: number of samples to take at each frequency
+    // The function automatically calculates the proper sampling duration based on the
+    // rocket's transmission duty cycle: normal mode sends altitude data every 100ms,
+    // while low battery mode sends data every 10 seconds.
+    virtual float scanFrequencyRange(float minFreq, float maxFreq, float stepSize, int samplesPerFreq = 5) {
+        // Calculate proper sampling duration based on the rocket's duty cycle
+        // In normal mode, altitude data is transmitted every 100ms
+        // We only need to sample for slightly longer than that to ensure we catch a transmission
+        // Add a small margin (20ms) to account for timing variations
+        const unsigned long sampleDuration = 120;
+        // Constrain to valid frequency range for this radio
+        minFreq = max(minFreq, getMinimumFrequency());
+        maxFreq = min(maxFreq, getMaximumFrequency());
+        
+        // Number of frequencies to scan
+        int numFreqs = (int)((maxFreq - minFreq) * 1000.0f / stepSize) + 1;
+        if (numFreqs <= 0) return (minFreq + maxFreq) / 2.0f;
+        
+        // Allocate array to store results
+        FreqScanResult* results = new FreqScanResult[numFreqs];
+        if (!results) return (minFreq + maxFreq) / 2.0f; // Memory allocation failed
+        
+        Serial.println("Scanning frequencies...");
+        Serial.print("Range: ");
+        Serial.print(minFreq);
+        Serial.print(" - ");
+        Serial.print(maxFreq);
+        Serial.print(" MHz, Step: ");
+        Serial.print(stepSize);
+        Serial.println(" kHz");
+        
+        // Save current frequency to restore later
+        float currentFreq = operatingFrequency;
+        
+        // Scan each frequency - this part is radio-specific and will be implemented by subclasses
+        float bestFreq = scanFrequenciesAndFindBest(minFreq, maxFreq, stepSize, samplesPerFreq, results, numFreqs, sampleDuration);
+        
+        // Free memory
+        delete[] results;
+        
+        // Restore original frequency
+        configure(currentFreq, 250.0, currentPower);
+        
+        return bestFreq;
+    }
+    
+    // This method must be implemented by each radio subclass to perform the actual scanning
+    // It should fill the results array and return the best frequency
+    virtual float scanFrequenciesAndFindBest(float minFreq, float maxFreq, float stepSize, 
+                                             int samplesPerFreq, FreqScanResult* results, int numFreqs,
+                                             unsigned long sampleDuration) {
+        // Default implementation just returns the middle frequency
+        return (minFreq + maxFreq) / 2.0f;
+    }
+    
+    // Get the minimum frequency supported by this radio (in MHz)
+    virtual float getMinimumFrequency() = 0;
+    
+    // Get the maximum frequency supported by this radio (in MHz)
+    virtual float getMaximumFrequency() = 0;
+    
+    // Get the standard announcement frequency for this radio (in MHz)
+    // This is used for initial communication before frequency selection
+    // Each radio implementation should return its appropriate band
+    virtual float getAnnouncementFrequency() = 0;
 };
 
 #endif // RADIO_INTERFACE_H

@@ -64,6 +64,15 @@ const float SNR_HYSTERESIS = 5.0f;    // SNR hysteresis to prevent frequent powe
 const float POWER_ADJUST_STEP = 2.0f; // Power adjustment step in dBm
 float txPower = 10.0f;                // Current transmission power in dBm
 
+// Frequency scanning parameters
+const float FREQUENCY_SCAN_STEP = 100.0f;  // Step size in kHz for frequency scanning
+float operatingFrequency = 863.0f;         // Default operating frequency in MHz
+// Using radio->getAnnouncementFrequency() instead of hardcoded value
+bool frequencyAcknowledged = false;        // Whether the selected frequency has been acknowledged
+unsigned long lastFrequencyAnnounceTime = 0;
+const unsigned long FREQUENCY_ANNOUNCE_INTERVAL = 2000; // Send frequency announcement every 2 seconds until acknowledged
+uint8_t radioType = 2;                     // 0=CC1101, 1=SX1278, 2=SX1262 (default)
+
 // RGB LED pins
 #define LED_RED_PIN 0    // D3 on NodeMCU
 #define LED_GREEN_PIN 2  // D4 on NodeMCU (Built-in LED)
@@ -121,6 +130,26 @@ void controlBuzzer(bool active);
 // Get the unique chip ID for this transmitter
 uint32_t transmitterId = 0;
 
+// Control the buzzer
+void controlBuzzer(bool active) {
+  Serial.print("Buzzer ");
+  Serial.println(active ? "ON" : "OFF");
+  digitalWrite(BUZZER_PIN, active ? HIGH : LOW);
+}
+
+// Adjust transmission power based on SNR feedback
+void adjustTransmissionPower(float snr) {
+  // This function is called from processSnrFeedback
+  // We're already using the Radio class's adaptive power control,
+  // so we don't need to implement this separately
+  Serial.print("SNR feedback received: ");
+  Serial.print(snr);
+  Serial.println(" dB");
+  
+  // The actual power adjustment is handled by the Radio class's
+  // processSnrFeedbackAndAdjustPower method, which is called in the main loop
+}
+
 TinyGPSPlus gps;
 
 char filename_base[24];
@@ -161,6 +190,7 @@ void setup() {
     // Try SX1278 as fallback
     delete radio;
     radio = new SX1278Radio(RADIO_CS, RADIO_RST, RADIO_DIO0);
+    radioType = 1; // SX1278
     
     if (!radio->begin()) {
       Serial.println("Failed to initialize SX1278 radio, trying CC1101...");
@@ -168,6 +198,7 @@ void setup() {
       // Try CC1101 as last resort
       delete radio;
       radio = new CC1101Radio(RADIO_CS, RADIO_DIO0, RADIOLIB_NC);
+      radioType = 0; // CC1101
       
       if (!radio->begin()) {
         Serial.println("Failed to initialize any radio");
@@ -176,12 +207,21 @@ void setup() {
     }
   }
   
-  // Configure radio parameters
-  // Using 863.0 MHz frequency (for SX1262), 250 kHz bandwidth, and 14 dBm power
-  if (!radio->configure(863.0, 250.0, 14)) {
-    Serial.println("Failed to configure radio");
+  // First configure radio for the announcement frequency
+  if (!radio->configure(radio->getAnnouncementFrequency(), 250.0, 14)) {
+    Serial.println("Failed to configure radio for announcements");
     while (true) { delay(10); }
   }
+  
+  // Scan for a clear frequency
+  Serial.println("Scanning for a clear frequency...");
+  float minFreq = radio->getMinimumFrequency();
+  float maxFreq = radio->getMaximumFrequency();
+  operatingFrequency = radio->scanFrequencyRange(minFreq, maxFreq, FREQUENCY_SCAN_STEP);
+  
+  Serial.print("Selected operating frequency: ");
+  Serial.print(operatingFrequency);
+  Serial.println(" MHz");
   
   // Configure adaptive power control
   radio->setAdaptivePowerParams(TARGET_SNR, SNR_HYSTERESIS, POWER_ADJUST_STEP);
@@ -410,78 +450,203 @@ void sendAltitudeData() {
   packet.orientationY = (int8_t)(orientY * 127.0f);
   packet.orientationZ = (int8_t)(orientZ * 127.0f);
 
-  
   packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
   
   radio->transmit((uint8_t*)&packet, sizeof(packet));
 }
 
-// Process command packets from the receiver
-void processCommandPacket(uint8_t* buffer, size_t length) {
-  // Verify packet length and checksum
-  if (length < sizeof(CommandPacket)) return;
+// Send frequency announcement packet
+void sendFrequencyAnnouncement() {
+  // Create frequency announcement packet
+  FrequencyAnnouncePacket packet;
+  packet.version = PROTOCOL_VERSION;
+  packet.packetType = PACKET_TYPE_FREQ_ANNOUNCE;
+  packet.transmitterId = transmitterId;
+  packet.frequency = (uint32_t)(operatingFrequency * 1000.0f); // Convert MHz to kHz
+  packet.radioType = radioType;
   
-  // Cast buffer to command packet struct
-  CommandPacket* packet = (CommandPacket*)buffer;
+  // Calculate checksum
+  packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
+  
+  // Send the packet
+  if (radio->transmit((uint8_t*)&packet, sizeof(packet))) {
+    Serial.print("Sent frequency announcement: ");
+    Serial.print(operatingFrequency);
+    Serial.println(" MHz");
+  } else {
+    Serial.println("Failed to send frequency announcement");
+  }
+}
+
+// Process frequency acknowledgment packet
+void processFrequencyAckPacket(uint8_t* buffer, size_t length) {
+  // Verify packet length
+  if (length < sizeof(FrequencyAckPacket)) {
+    Serial.println("Frequency ack packet too short");
+    return;
+  }
+  
+  // Mark frequency as acknowledged
+  frequencyAcknowledged = true;
+  Serial.print("Frequency acknowledged: ");
+  Serial.print(operatingFrequency);
+  Serial.println(" MHz");
+}
+
+// Process SNR feedback packet
+void processSnrFeedback(uint8_t* buffer, size_t length) {
+  // Verify packet length
+  if (length < sizeof(SnrFeedbackPacket)) {
+    Serial.println("SNR feedback packet too short");
+    return;
+  }
+  
+  // Extract packet data
+  SnrFeedbackPacket* packet = (SnrFeedbackPacket*)buffer;
+  
+  // Verify this is for our transmitter
+  if (packet->transmitterId != transmitterId) {
+    Serial.print("Ignoring SNR feedback for different transmitter: 0x");
+    Serial.println(packet->transmitterId, HEX);
+    return;
+  }
   
   // Verify checksum
-  if (packet->checksum != calculateChecksum(buffer, length - 1)) return;
+  uint8_t calculatedChecksum = calculateChecksum(buffer, sizeof(SnrFeedbackPacket) - 1);
+  if (packet->checksum != calculatedChecksum) {
+    Serial.println("SNR feedback packet has invalid checksum");
+    return;
+  }
   
-  // Verify this command is for this rocket
-  if (packet->transmitterId != transmitterId) return;
+  // Log the SNR value
+  Serial.print("Received SNR feedback: ");
+  Serial.print(packet->snrValue);
+  Serial.println(" dB");
   
-  // Process based on command subtype
+  // Adjust transmission power based on SNR feedback
+  adjustTransmissionPower(packet->snrValue);
+}
+
+// Process command packet
+void processCommandPacket(uint8_t* buffer, size_t length) {
+  // Verify packet length
+  if (length < sizeof(CommandPacket)) {
+    Serial.println("Command packet too short");
+    return;
+  }
+  
+  // Extract packet data
+  CommandPacket* packet = (CommandPacket*)buffer;
+  
+  // Verify this is for our transmitter
+  if (packet->transmitterId != transmitterId) {
+    Serial.print("Ignoring command for different transmitter: 0x");
+    Serial.println(packet->transmitterId, HEX);
+    return;
+  }
+  
+  // Verify checksum
+  uint8_t calculatedChecksum = calculateChecksum(buffer, sizeof(CommandPacket) - 1);
+  if (packet->checksum != calculatedChecksum) {
+    Serial.println("Command packet has invalid checksum");
+    return;
+  }
+  
+  // Process command based on subtype
   switch (packet->subType) {
     case COMMAND_SUBTYPE_BUZZER:
-      Serial.print("Buzzer command received: ");
+      Serial.print("Received buzzer command: ");
       Serial.println(packet->commandParam ? "ON" : "OFF");
       controlBuzzer(packet->commandParam != 0);
       break;
       
     case COMMAND_SUBTYPE_ABORT:
-      // Only process if parameter is 1 (safety check)
-      if (packet->commandParam == 1) {
-        Serial.println("EMERGENCY ABORT COMMAND RECEIVED!");
-        // Set LED to indicate abort status
-        setLedRed();
-        // Activate both relays to trigger parachute deployment
-        digitalWrite(PRIMARY_RELAY_PIN, HIGH);
-        digitalWrite(BACKUP_RELAY_PIN, HIGH);
-        relayActive = true;
-        // Activate buzzer for recovery
-        controlBuzzer(true);
-        Serial.println("Emergency parachute deployment activated");
-      } else {
-        Serial.println("Abort command received with invalid parameter");
-      }
+      Serial.println("RECEIVED EMERGENCY ABORT COMMAND!");
+      // Trigger immediate parachute deployment
+      digitalWrite(PRIMARY_RELAY_PIN, HIGH);
+      digitalWrite(BACKUP_RELAY_PIN, HIGH);
+      relayActive = true;
+      primaryRelayActivationTime = micros();
       break;
       
     default:
       Serial.print("Unknown command subtype: ");
-      Serial.println(packet->subType);
+      Serial.println(packet->subType, HEX);
       break;
   }
 }
 
-// Control the buzzer state
-void controlBuzzer(bool active) {
-  buzzerActive = active;
-  
-  if (!buzzerActive) {
-    // Turn off buzzer immediately when deactivated
-    digitalWrite(BUZZER_PIN, LOW);
-  } else {
-    // Reset toggle timer when activated
-    lastBuzzerToggle = millis();
+void loop() {
+  // Check if we need to send frequency announcements
+  if (!frequencyAcknowledged && (millis() - lastFrequencyAnnounceTime >= FREQUENCY_ANNOUNCE_INTERVAL)) {
+    // Make sure we're on the announcement frequency
+    radio->configure(radio->getAnnouncementFrequency(), 250.0, 14);
+    sendFrequencyAnnouncement();
+    lastFrequencyAnnounceTime = millis();
+    
+    // Check for frequency acknowledgment
+    uint8_t buffer[MAX_PACKET_SIZE];
+    int bytesRead = radio->receive(buffer, MAX_PACKET_SIZE);
+    
+    if (bytesRead > 0) {
+      // Check packet type
+      if (buffer[0] == PROTOCOL_VERSION) {
+        uint8_t packetType = buffer[1];
+        
+        switch (packetType) {
+          case PACKET_TYPE_FREQ_ACK:
+            processFrequencyAckPacket(buffer, bytesRead);
+            break;
+            
+          case PACKET_TYPE_FEEDBACK:
+            processSnrFeedback(buffer, bytesRead);
+            break;
+            
+          case PACKET_TYPE_COMMAND:
+            processCommandPacket(buffer, bytesRead);
+            break;
+        }
+      }
+    }
+    
+    // If frequency is acknowledged, switch to the operating frequency
+    if (frequencyAcknowledged) {
+      radio->configure(operatingFrequency, 250.0, txPower);
+    }
+    
+    // Return early to avoid sending other packets during the announcement phase
+    return;
   }
   
-  Serial.print("Buzzer ");
-  Serial.println(buzzerActive ? "activated" : "deactivated");
-}
-
-
-
-void loop() {
+  // If frequency is not acknowledged yet, don't send regular telemetry
+  if (!frequencyAcknowledged) {
+    return;
+  }
+  
+  // Check for incoming packets (SNR feedback, commands, etc.)
+  uint8_t buffer[MAX_PACKET_SIZE];
+  int bytesRead = radio->receive(buffer, MAX_PACKET_SIZE);
+  
+  if (bytesRead > 0) {
+    // Check packet type
+    if (buffer[0] == PROTOCOL_VERSION) {
+      uint8_t packetType = buffer[1];
+      
+      switch (packetType) {
+        case PACKET_TYPE_FEEDBACK:
+          processSnrFeedback(buffer, bytesRead);
+          break;
+          
+        case PACKET_TYPE_COMMAND:
+          processCommandPacket(buffer, bytesRead);
+          break;
+      }
+    }
+  }
+  
+  // Check for SNR feedback and adjust power if needed
+  radio->processSnrFeedbackAndAdjustPower(TARGET_SNR);
+  
   // Get current battery percentage with hysteresis to prevent rapid mode switching
   static bool lowBatteryMode = false;
   uint8_t batteryPercent = (uint8_t)lipo.percent();
@@ -524,44 +689,6 @@ void loop() {
   if (!lowBatteryMode && millis() - lastAltSend >= 100) {
     sendAltitudeData();
     lastAltSend = millis();
-  }
-  
-  // Process GPS data
-  while (Serial.available() > 0) {
-    gps.encode(Serial.read());
-  }
-  
-  // Process any incoming radio packets
-  if (radio->available()) {
-    // Get the packet data
-    uint8_t buffer[64]; // Buffer for incoming packet
-    size_t length = 0;
-    
-    // Read the packet
-    if (radio->receive(buffer, length) == RADIOLIB_ERR_NONE) {
-      // Check packet type
-      if (length > 0) {
-        uint8_t packetType = buffer[0];
-        
-        switch (packetType) {
-          case PACKET_TYPE_FEEDBACK:
-            // Process SNR feedback and adjust power
-            radio->processSnrFeedbackAndAdjustPower(TARGET_SNR);
-            // Update our local txPower variable to match the radio's current power
-            txPower = radio->getCurrentPower();
-            break;
-            
-          case PACKET_TYPE_COMMAND:
-            // Process command packet
-            processCommandPacket(buffer, length);
-            break;
-            
-          default:
-            // Unknown packet type, ignore
-            break;
-        }
-      }
-    }
   }
   
   // Process IMU data

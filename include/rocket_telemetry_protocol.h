@@ -10,6 +10,8 @@
 #define PACKET_TYPE_GPS 0x01
 #define PACKET_TYPE_ALTITUDE 0x02
 #define PACKET_TYPE_SYSTEM 0x03
+#define PACKET_TYPE_FREQ_ANNOUNCE 0x04
+#define PACKET_TYPE_FREQ_ACK 0x05
 #define PACKET_TYPE_COMMAND 0xFE
 #define PACKET_TYPE_FEEDBACK 0xFF
 
@@ -94,5 +96,24 @@ struct CommandPacket {
     uint8_t subType;      // Command type (see command subtypes)
     uint32_t transmitterId; // Transmitter ID this command is for
     uint8_t commandParam; // Command parameter (1=on, 0=off for buzzer)
+    uint8_t checksum;
+};
+
+// Frequency announcement packet sent from logger to receiver
+struct FrequencyAnnouncePacket {
+    uint8_t version;
+    uint8_t packetType;     // 0x04 for frequency announcement
+    uint32_t transmitterId; // Unique ID of the transmitter
+    uint32_t frequency;     // Frequency in kHz (e.g., 863000 for 863.0 MHz)
+    uint8_t radioType;      // 0=CC1101, 1=SX1278, 2=SX1262
+    uint8_t checksum;
+};
+
+// Frequency acknowledgment packet sent from receiver to logger
+struct FrequencyAckPacket {
+    uint8_t version;
+    uint8_t packetType;     // 0x05 for frequency acknowledgment
+    uint32_t transmitterId; // Transmitter ID this ack is for
+    uint32_t frequency;     // Acknowledged frequency in kHz
     uint8_t checksum;
 };

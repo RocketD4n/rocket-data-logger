@@ -43,11 +43,19 @@ void sendAbortCommand(uint32_t transmitterId);
 void processGpsPacket(uint8_t* buffer, size_t length);
 void processAltitudePacket(uint8_t* buffer, size_t length);
 void processSystemPacket(uint8_t* buffer, size_t length);
+void processFrequencyAnnouncePacket(uint8_t* buffer, size_t length);
+void sendFrequencyAcknowledgment(uint32_t transmitterId, float frequency);
+void switchToTransmitterFrequency(uint32_t transmitterId);
 void lowBatteryShutdown();
 
 // SNR feedback control
 unsigned long lastSnrFeedbackTime = 0;
 const unsigned long SNR_FEEDBACK_INTERVAL = 1000; // Send SNR feedback every 1 second
+
+// Frequency scanning and announcement parameters
+unsigned long lastFrequencyAckTime = 0;
+const unsigned long FREQUENCY_ACK_INTERVAL = 500; // Send frequency ack every 500ms until confirmed
+bool listeningForAnnouncements = true; // Start by listening for frequency announcements
 
 // SD card configuration
 #define SD_CS 33 // SD card CS pin on TFT shield
@@ -193,13 +201,14 @@ void setup() {
     }
     Serial.println(F("success!"));
     
-    // Configure radio parameters
-    // Using 863.0 MHz frequency (for SX1262), 250 kHz bandwidth, and 14 dBm power
-    if (!radio->configure(863.0, 250.0, 14)) {
+    // Configure radio for the announcement frequency
+    if (!radio->configure(radio->getAnnouncementFrequency(), 250.0, 14)) {
         Serial.println(F("Radio configuration failed!"));
-        while (true);
+    } else {
+        Serial.print(F("Listening for frequency announcements on "));
+        Serial.print(radio->getAnnouncementFrequency());
+        Serial.println(F(" MHz"));
     }
-    Serial.println(F("Radio configured successfully!"));
 }
 
 // Process GPS packet
@@ -466,6 +475,95 @@ void sendAbortCommand(uint32_t transmitterId) {
     display.setAbortSent(true);
 }
 
+// Process frequency announcement packet from a rocket
+void processFrequencyAnnouncePacket(uint8_t* buffer, size_t length) {
+    // Verify packet length
+    if (length < sizeof(FrequencyAnnouncePacket)) {
+        Serial.println("Frequency announcement packet too short");
+        return;
+    }
+    
+    // Extract packet data
+    FrequencyAnnouncePacket* packet = (FrequencyAnnouncePacket*)buffer;
+    
+    // Convert frequency from kHz to MHz
+    float frequency = packet->frequency / 1000.0f;
+    uint32_t transmitterId = packet->transmitterId;
+    uint8_t radioType = packet->radioType;
+    
+    Serial.print("Received frequency announcement from transmitter 0x");
+    Serial.print(transmitterId, HEX);
+    Serial.print(": ");
+    Serial.print(frequency);
+    Serial.println(" MHz");
+    
+    // Add transmitter to known transmitters if not already present
+    display.addTransmitter(transmitterId);
+    
+    // Store the frequency and radio type for this transmitter
+    display.setTransmitterFrequency(transmitterId, frequency, radioType);
+    
+    // Send acknowledgment
+    sendFrequencyAcknowledgment(transmitterId, frequency);
+    
+    // If this is the selected transmitter, switch to its frequency
+    if (display.isRocketSelected() && display.getSelectedTransmitterId() == transmitterId) {
+        switchToTransmitterFrequency(transmitterId);
+    }
+}
+
+// Send frequency acknowledgment to a rocket
+void sendFrequencyAcknowledgment(uint32_t transmitterId, float frequency) {
+    // Create frequency ack packet
+    FrequencyAckPacket packet;
+    packet.version = PROTOCOL_VERSION;
+    packet.packetType = PACKET_TYPE_FREQ_ACK;
+    packet.transmitterId = transmitterId;
+    packet.frequency = (uint32_t)(frequency * 1000.0f); // Convert MHz to kHz
+    packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
+    
+    // Send the packet
+    if (radio->transmit((uint8_t*)&packet, sizeof(packet))) {
+        Serial.print("Sent frequency acknowledgment to transmitter 0x");
+        Serial.print(transmitterId, HEX);
+        Serial.print(": ");
+        Serial.print(frequency);
+        Serial.println(" MHz");
+        
+        // Mark this frequency as acknowledged
+        display.setFrequencyAcknowledged(transmitterId, true);
+    } else {
+        Serial.println("Failed to send frequency acknowledgment");
+    }
+}
+
+// Switch to the operating frequency of a transmitter
+void switchToTransmitterFrequency(uint32_t transmitterId) {
+    // Get the frequency for this transmitter
+    float frequency = display.getTransmitterFrequency(transmitterId);
+    
+    // Only switch if we have a valid frequency
+    if (frequency > 0.0f) {
+        Serial.print("Switching to frequency ");
+        Serial.print(frequency);
+        Serial.print(" MHz for transmitter 0x");
+        Serial.println(transmitterId, HEX);
+        
+        // Configure radio for this frequency
+        radio->configure(frequency, 250.0, 14);
+        
+        // No longer need to listen for announcements
+        listeningForAnnouncements = false;
+    } else {
+        Serial.print("No frequency information available for transmitter 0x");
+        Serial.println(transmitterId, HEX);
+        
+        // Switch back to announcement frequency to listen for announcements
+        radio->configure(radio->getAnnouncementFrequency(), 250.0, 14);
+        listeningForAnnouncements = true;
+    }
+}
+
 // Display low battery shutdown message and shut down
 void lowBatteryShutdown() {
     // Display low battery warning using the RocketMonitorScreen class
@@ -589,6 +687,20 @@ void loop() {
                     processSystemPacket(data, packetSize);
                     break;
                     
+                case PACKET_TYPE_FREQ_ANNOUNCE:
+                    processFrequencyAnnouncePacket(data, packetSize);
+                    break;
+                    
+                case PACKET_TYPE_COMMAND:
+                    // Process command packets (these are sent from receiver to transmitter)
+                    // We don't need to do anything here as we're the sender
+                    break;
+                    
+                case PACKET_TYPE_FEEDBACK:
+                    // Process feedback packets (SNR feedback, etc.)
+                    // We don't need special handling here as the radio handles SNR feedback
+                    break;
+                    
                 default:
                     Serial.print("Unknown packet type: ");
                     Serial.println(packetType, HEX);
@@ -610,10 +722,50 @@ void loop() {
         }
     }
     
+    // Periodically resend frequency acknowledgments for unacknowledged frequencies
+    // This ensures the rocket receives the acknowledgment and can switch to the selected frequency
+    static unsigned long lastFrequencyAckCheck = 0;
+    if (listeningForAnnouncements && millis() - lastFrequencyAckCheck >= FREQUENCY_ACK_INTERVAL) {
+        // Check all transmitters for unacknowledged frequencies
+        for (int i = 0; i < display.getNumTransmitters(); i++) {
+            uint32_t transmitterId = display.getTransmitterId(i);
+            float frequency = display.getTransmitterFrequency(transmitterId);
+            
+            // If frequency is valid but not acknowledged, resend acknowledgment
+            if (frequency > 0.0f && !display.isFrequencyAcknowledged(transmitterId)) {
+                sendFrequencyAcknowledgment(transmitterId, frequency);
+            }
+        }
+        lastFrequencyAckCheck = millis();
+    }
+    
     // Update display every second regardless of new data
     static unsigned long lastDisplayUpdate = 0;
     if (millis() - lastDisplayUpdate >= 1000) {
         display.updateDisplay();
         lastDisplayUpdate = millis();
+    }
+    
+    // Check for manual rescan request from the UI
+    if (display.isRescanRequested()) {
+        Serial.println("Manual rescan requested");
+        // Switch back to announcement frequency to listen for new rockets
+        radio->configure(radio->getAnnouncementFrequency(), 250.0, 14);
+        listeningForAnnouncements = true;
+        display.clearRescanRequest();
+    }
+    
+    // Check for auto-rescan due to connection timeout (no data for 10 seconds)
+    if (display.isRocketSelected() && !listeningForAnnouncements && display.checkConnectionTimeout()) {
+        Serial.println("Auto-rescan triggered: No data received for 10 seconds");
+        // Switch back to announcement frequency to listen for new rockets
+        radio->configure(radio->getAnnouncementFrequency(), 250.0, 14);
+        listeningForAnnouncements = true;
+        
+        // If we're on the main data page, switch to transmitter selection page
+        if (display.getCurrentPage() != RocketMonitorScreen::PAGE_TRANSMITTER_SELECTION) {
+            display.setCurrentPage(RocketMonitorScreen::PAGE_TRANSMITTER_SELECTION);
+            display.updateDisplay();
+        }
     }
 }
