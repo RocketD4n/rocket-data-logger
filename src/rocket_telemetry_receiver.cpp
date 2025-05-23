@@ -8,13 +8,19 @@
 #include <time.h>
 #include "rocket_telemetry_protocol.h"
 #include "cc1101_radio.h"
+#include "sx1278_radio.h"
+#include "sx1262_radio.h"
 #include "rocket_monitor_screen.h"
 
-// CC1101 configuration for ESP32
-#define CC1101_CS 5    // GPIO5
-#define CC1101_GDO0 4  // GPIO4
-// Radio instance using CC1101
-Radio* radio = new CC1101Radio(CC1101_CS, CC1101_GDO0, RADIOLIB_NC);
+// Radio configuration pins for ESP32
+#define RADIO_CS 5     // GPIO5
+#define RADIO_DIO0 4   // GPIO4 (DIO0 for SX1278, GDO0 for CC1101)
+#define RADIO_DIO1 25  // GPIO25 (DIO1 for SX1262)
+#define RADIO_BUSY 26  // GPIO26 (BUSY for SX1262)
+#define RADIO_RST 27   // GPIO27 (RESET for SX1262/SX1278)
+
+// Radio instance - will be initialized to SX1262 by default
+Radio* radio = nullptr;
 
 // Battery monitor configuration
 #define MAX17043_SDA 32
@@ -159,17 +165,37 @@ void setup() {
         sdCardAvailable = false;
     }
     
-    // Initialize radio
-    Serial.print(F("[Radio] Initializing ... "));
+    // Initialize radio (SX1262 by default)
+    Serial.print(F("[Radio] Initializing SX1262 ... "));
+    radio = new SX1262Radio(RADIO_CS, RADIO_RST, RADIO_DIO1, RADIO_BUSY);
+    
     if (!radio->begin()) {
-        Serial.println(F("failed!"));
-        while (true);
+        Serial.println(F("failed! Trying SX1278..."));
+        
+        // Try SX1278 as fallback
+        delete radio;
+        radio = new SX1278Radio(RADIO_CS, RADIO_RST, RADIO_DIO0);
+        Serial.print(F("[Radio] Initializing SX1278 ... "));
+        
+        if (!radio->begin()) {
+            Serial.println(F("failed! Trying CC1101..."));
+            
+            // Try CC1101 as last resort
+            delete radio;
+            radio = new CC1101Radio(RADIO_CS, RADIO_DIO0, RADIOLIB_NC);
+            Serial.print(F("[Radio] Initializing CC1101 ... "));
+            
+            if (!radio->begin()) {
+                Serial.println(F("failed! No radio initialized."));
+                while (true);
+            }
+        }
     }
     Serial.println(F("success!"));
     
     // Configure radio parameters
-    // Using 433.92 MHz frequency, 250 kHz bandwidth (adjust if needed), and 10 dBm power
-    if (!radio->configure(433.92, 250.0, 10)) {
+    // Using 863.0 MHz frequency (for SX1262), 250 kHz bandwidth, and 14 dBm power
+    if (!radio->configure(863.0, 250.0, 14)) {
         Serial.println(F("Radio configuration failed!"));
         while (true);
     }

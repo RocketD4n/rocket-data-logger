@@ -21,14 +21,19 @@ Advantages of LVGL
 #include <algorithm> // For std::max
 #include "rocket_accelerometer.h"
 
-// CC1101 configuration
-#define CC1101_CS 16  // D0 on NodeMCU
-#define CC1101_GDO0 14 // D5 on NodeMCU
+// Radio configuration pins
+#define RADIO_CS 16    // D0 on NodeMCU
+#define RADIO_DIO0 14  // D5 on NodeMCU (DIO0 for SX1278, GDO0 for CC1101)
+#define RADIO_DIO1 12  // D6 on NodeMCU (DIO1 for SX1262)
+#define RADIO_BUSY 13  // D7 on NodeMCU (BUSY for SX1262)
+#define RADIO_RST 15   // D8 on NodeMCU (RESET for SX1262/SX1278)
 
 #include "rocket_telemetry_protocol.h"
 #include "cc1101_radio.h"
+#include "sx1278_radio.h"
+#include "sx1262_radio.h"
 
-// Radio instance using CC1101
+// Radio instance - will be initialized to SX1262 by default
 Radio* radio = nullptr;
 
 // This functionality has been moved to the Radio class
@@ -69,7 +74,7 @@ float txPower = 10.0f;                // Current transmission power in dBm
 // for a recovery beacon that only activates after landing
 #define BUZZER_PIN 1    // D10 (TX) on NodeMCU
 
-#define PRIMARY_RELAY_PIN 12 // D6 on NodeMCU
+#define PRIMARY_RELAY_PIN 5 // D1 on NodeMCU
 
 // LED color functions
 void setLedColor(bool red, bool green, bool blue) {
@@ -82,7 +87,7 @@ void setLedYellow() { setLedColor(true, true, false); }
 void setLedRed() { setLedColor(true, false, false); }
 void setLedGreen() { setLedColor(false, true, false); }
 void setLedBlue() { setLedColor(false, false, true); }
-#define BACKUP_RELAY_PIN 13 // D7 on NodeMCU
+#define BACKUP_RELAY_PIN 4 // D2 on NodeMCU
 #define ALTITUDE_DROP_THRESHOLD 10.0f // meters
 #define BACKUP_DELAY 1000000 // 1 second in microseconds
 
@@ -147,17 +152,33 @@ void setup() {
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);  // Start with buzzer off
 
-  // Initialize radio (CC1101)
-  radio = new CC1101Radio(CC1101_CS, CC1101_GDO0, RADIOLIB_NC);
+  // Initialize radio (SX1262 by default)
+  radio = new SX1262Radio(RADIO_CS, RADIO_RST, RADIO_DIO1, RADIO_BUSY);
   
   if (!radio->begin()) {
-    Serial.println("Failed to initialize radio");
-    while (true) { delay(10); }
+    Serial.println("Failed to initialize SX1262 radio, trying SX1278...");
+    
+    // Try SX1278 as fallback
+    delete radio;
+    radio = new SX1278Radio(RADIO_CS, RADIO_RST, RADIO_DIO0);
+    
+    if (!radio->begin()) {
+      Serial.println("Failed to initialize SX1278 radio, trying CC1101...");
+      
+      // Try CC1101 as last resort
+      delete radio;
+      radio = new CC1101Radio(RADIO_CS, RADIO_DIO0, RADIOLIB_NC);
+      
+      if (!radio->begin()) {
+        Serial.println("Failed to initialize any radio");
+        while (true) { delay(10); }
+      }
+    }
   }
   
   // Configure radio parameters
-  // Using 433.92 MHz frequency, 250 kHz bandwidth (adjust if needed), and 10 dBm power
-  if (!radio->configure(433.92, 250.0, 10)) {
+  // Using 863.0 MHz frequency (for SX1262), 250 kHz bandwidth, and 14 dBm power
+  if (!radio->configure(863.0, 250.0, 14)) {
     Serial.println("Failed to configure radio");
     while (true) { delay(10); }
   }

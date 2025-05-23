@@ -1,6 +1,6 @@
 # Rocket Data Logger
 
-This project is a rocket telemetry system that logs GPS data, altitude, and IMU sensor readings, and transmits this data wirelessly using either a CC1101 or SX1278 (LoRa) radio module. It also logs to a local SD card.
+This project is a rocket telemetry system that logs GPS data, altitude, and IMU sensor readings, and transmits this data wirelessly using either a HT-RA62 (SX1262) LoRa, SX1278 LoRa, or CC1101 radio module. It also logs to a local SD card.
 
 ## Key Features
 
@@ -20,9 +20,10 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 
 ### Data Logger (Rocket)
 - NodeMCU v2 (ESP8266) and power supply
-- Either:
-  - CC1101 433MHz Transmitter, or
-  - SX1278 433MHz LoRa Transmitter
+- One of the following radio modules:
+  - HT-RA62 (SX1262) 863MHz LoRa Transmitter (default), or
+  - SX1278 433MHz LoRa Transmitter, or
+  - CC1101 433MHz Transmitter
 - GPS Module
 - BMP180/BMP085 Pressure and Temperature Sensor
 - MPU6050 IMU (Accelerometer and Gyroscope)
@@ -32,9 +33,10 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 
 ### Telemetry Receiver (Ground Station)
 - ESP32 Dev Board and power supply
-- Either:
-  - CC1101 433MHz Receiver, or
-  - SX1278 433MHz LoRa Receiver
+- One of the following radio modules:
+  - HT-RA62 (SX1262) 863MHz LoRa Receiver (default), or
+  - SX1278 433MHz LoRa Receiver, or
+  - CC1101 433MHz Receiver
 - 2.8" TFT Display (ILI9341) with SD card slot
 - MicroSD card for data logging
 
@@ -486,10 +488,11 @@ Important notes for SX1278 maximum power operation:
 
 ## Features
 
-1. **Dual Radio Support**
-   - CC1101 Radio: Simple, low-power FSK radio
-   - SX1278 (LoRa) Radio: Long-range, high-reliability radio
-   - Automatic detection and configuration of whichever radio is connected
+1. **Multi-Radio Support**
+   - HT-RA62 (SX1262) LoRa Radio: High-performance, long-range radio operating in the 863MHz band (default)
+   - SX1278 LoRa Radio: Long-range, high-reliability radio operating in the 433MHz band
+   - CC1101 Radio: Simple, low-power FSK radio operating in the 433MHz band
+   - Automatic detection and fallback if the preferred radio is not connected
 
 2. **Multi-Transmitter Support**
    - Each transmitter has a unique ID based on the ESP8266 chip ID
