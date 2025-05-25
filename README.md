@@ -37,8 +37,95 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
   - HT-RA62 (SX1262) 863MHz LoRa Receiver (default), or
   - SX1278 433MHz LoRa Receiver, or
   - CC1101 433MHz Receiver
-- 2.8" TFT Display (ILI9341) with SD card slot
+- 2.8" TFT Display (ILI9341) with XPT2046 touch controller
+- MAX17043 LiPo Battery Fuel Gauge
 - MicroSD card for data logging
+
+## Hardware Setup and Wiring
+
+### ESP8266 Rocket Data Logger Wiring
+
+#### Radio Module (SX1262/SX1278/CC1101)
+```
+Radio Pin  | ESP8266 GPIO Pin | NodeMCU Pin
+-----------|-----------------|------------
+CS         | GPIO16          | D0
+DIO0/GDO0  | GPIO14          | D5 (for SX1278/CC1101)
+DIO1       | GPIO12          | D6 (for SX1262)
+BUSY       | GPIO13          | D7 (for SX1262)
+RST        | GPIO15          | D8 (for SX1262/SX1278)
+```
+
+#### I2C Sensors (BMP180, MPU6050, MAX17043)
+```
+Sensor Pin | ESP8266 GPIO Pin | NodeMCU Pin
+-----------|-----------------|------------
+SDA        | GPIO4           | D2
+SCL        | GPIO5           | D1
+```
+
+#### RGB LED Pins
+```
+LED Pin    | ESP8266 GPIO Pin | NodeMCU Pin
+-----------|-----------------|------------
+RED        | GPIO0           | D3
+GREEN      | GPIO2           | D4 (Built-in LED)
+BLUE       | GPIO13          | D7
+```
+
+#### Other Pins
+```
+Component  | ESP8266 GPIO Pin | NodeMCU Pin
+-----------|-----------------|------------
+BUZZER     | GPIO1           | TX (D10)
+PRIMARY_RELAY | GPIO5        | D1
+BACKUP_RELAY  | GPIO4        | D2
+```
+
+### ESP32 Receiver Wiring
+
+#### TFT Display (ILI9341)
+```
+TFT Pin             | ESP32 GPIO Pin
+-------------------|---------------
+MISO (SDO/OUT)     | GPIO19 (VSPI MISO)
+MOSI (SDI/IN/SDA)  | GPIO23 (VSPI MOSI)
+SCLK (SCK/CLK)     | GPIO18 (VSPI SCK)
+CS (Chip Select)   | GPIO15
+DC/RS (Data/Command)| GPIO2
+RST (Reset)        | GPIO4
+```
+
+**Note:** If your display uses parallel mode (with LCD_RS, LCD_WR, LCD_RD pins), you'll need a different configuration. This project uses SPI mode. The DC pin is equivalent to the LCD_RS (Register Select) pin in parallel mode.
+
+#### Touch Controller (XPT2046)
+```
+Touch Pin  | ESP32 GPIO Pin
+-----------|---------------
+CS         | GPIO21
+MISO       | GPIO19 (shared with TFT)
+MOSI       | GPIO23 (shared with TFT)
+SCLK       | GPIO18 (shared with TFT)
+```
+
+#### Radio Module (SX1262/SX1278/CC1101)
+```
+Radio Pin  | ESP32 GPIO Pin
+-----------|---------------
+CS         | GPIO5
+DIO0/GDO0  | GPIO4  (for SX1278/CC1101)
+DIO1       | GPIO25 (for SX1262)
+BUSY       | GPIO26 (for SX1262)
+RST        | GPIO27 (for SX1262/SX1278)
+```
+
+#### Battery Monitor (MAX17043)
+```
+MAX17043 Pin | ESP32 GPIO Pin
+-------------|---------------
+SDA          | GPIO32
+SCL          | GPIO22
+```
 
 ## Display Layout
 
@@ -222,6 +309,12 @@ The system implements dynamic frequency selection to optimize communication reli
    - Switches back to announcement frequency to search for the rocket again
    - Manual rescan button on transmitter selection page for user-initiated rescans
    - Handles rocket restarts and frequency changes automatically
+
+5. **Dynamic Power Management**:
+   - Automatically switches to maximum transmission power during launch and flight
+   - Restores normal power mode after landing
+   - Implements low-battery power saving with hysteresis (45%/55%)
+   - Ensures reliable communication during critical flight phases
 
 ### Frequency Control Packets
 

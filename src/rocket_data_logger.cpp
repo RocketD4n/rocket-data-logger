@@ -63,6 +63,9 @@ const float TARGET_SNR = 15.0f;       // Target SNR for reliable communication (
 const float SNR_HYSTERESIS = 5.0f;    // SNR hysteresis to prevent frequent power changes
 const float POWER_ADJUST_STEP = 2.0f; // Power adjustment step in dBm
 float txPower = 10.0f;                // Current transmission power in dBm
+const float MAX_TX_POWER = 20.0f;     // Maximum transmission power in dBm for launch mode
+const float NORMAL_TX_POWER = 10.0f;  // Normal transmission power in dBm
+float savedTxPower = txPower;         // Save power level before launch
 
 // Frequency scanning parameters
 const float FREQUENCY_SCAN_STEP = 100.0f;  // Step size in kHz for frequency scanning
@@ -406,13 +409,35 @@ void sendSystemData() {
   packet.bootTime = bootTimeEpoch;
   
   // Set launch state using the enum values
+  static uint8_t previousLaunchState = 0;
   if (landedDetected) {
     packet.launchState = LAUNCH_STATE_LANDED;      // Landed
+    // If we've just landed, restore normal power mode
+    if (previousLaunchState == LAUNCH_STATE_LAUNCHED) {
+      // Restore previous power setting
+      txPower = savedTxPower;
+      // Reconfigure radio with the restored power
+      radio->configure(operatingFrequency, 250.0, txPower);
+      Serial.println("Landed: Restored normal power mode");
+    }
   } else if (launchDetected) {
     packet.launchState = LAUNCH_STATE_LAUNCHED;    // In flight
+    // If we've just launched, switch to maximum power
+    if (previousLaunchState != LAUNCH_STATE_LAUNCHED) {
+      // Save current power setting before switching to max
+      savedTxPower = txPower;
+      // Set to maximum power during flight
+      txPower = MAX_TX_POWER;
+      // Reconfigure radio with the new power
+      radio->configure(operatingFrequency, 250.0, txPower);
+      Serial.println("Launched: Switched to maximum power mode");
+    }
   } else {
     packet.launchState = LAUNCH_STATE_WAITING;    // Pre-launch
   }
+  
+  // Save current state for next comparison
+  previousLaunchState = packet.launchState;
   
   // Include tilt angle from calibration (0.5 degree resolution)
   packet.tiltAngle = accel.getTiltAngleInt();
