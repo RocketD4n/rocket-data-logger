@@ -5,6 +5,7 @@
 #include <TFT_eSPI.h>
 #include <XPT2046_Touchscreen.h>
 #include <Preferences.h>
+#include <SD.h>
 
 // Forward declarations
 class Radio;
@@ -35,26 +36,26 @@ public:
     static const int MAX_NAME_LENGTH = 16;
     static const int MAX_DATA_POINTS = 100;
     
-    // Display layout constants
+    // Display layout constants for 240x320 display
     static const int HEADER_HEIGHT = 30;
     static const int BATTERY_ICON_WIDTH = 25;
     static const int BATTERY_ICON_HEIGHT = 12;
     static const int VALUE_HEIGHT = 26;
-    static const int RIGHT_COL = 180;
+    static const int RIGHT_COL = 130;  // Adjusted for narrower display width
     static const uint16_t LABEL_COLOR = TFT_YELLOW;
     static const uint16_t VALUE_COLOR = TFT_WHITE;
     
     // Navigation button constants
-    static const int NAV_BUTTON_WIDTH = 40;
-    static const int NAV_BUTTON_HEIGHT = 40;
+    static const int NAV_BUTTON_WIDTH = 30;  // Smaller buttons for narrower display
+    static const int NAV_BUTTON_HEIGHT = 30;
     static const int NAV_BUTTON_MARGIN = 5;
     static const uint16_t NAV_BUTTON_COLOR = TFT_BLUE;
     
     // Graph constants
-    static const int GRAPH_X = 50;
-    static const int GRAPH_Y = 50;
-    static const int GRAPH_WIDTH = 220;
-    static const int GRAPH_HEIGHT = 140;
+    static const int GRAPH_X = 30;  // Adjusted for narrower display
+    static const int GRAPH_Y = 60;  // More vertical space available
+    static const int GRAPH_WIDTH = 180;  // Narrower graph
+    static const int GRAPH_HEIGHT = 180;  // Taller graph for better use of portrait orientation
     static const uint16_t GRAPH_COLOR = TFT_GREEN;
     static const uint16_t AXIS_COLOR = TFT_WHITE;
     

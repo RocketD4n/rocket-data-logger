@@ -12,25 +12,26 @@
 #include "sx1262_radio.h"
 #include "rocket_monitor_screen.h"
 
-// Radio configuration pins for ESP32
+// Radio configuration pins for ESP32-S3
 #define RADIO_CS 5     // GPIO5
 #define RADIO_DIO0 4   // GPIO4 (DIO0 for SX1278, GDO0 for CC1101)
-#define RADIO_DIO1 25  // GPIO25 (DIO1 for SX1262)
-#define RADIO_BUSY 26  // GPIO26 (BUSY for SX1262)
-#define RADIO_RST 27   // GPIO27 (RESET for SX1262/SX1278)
+#define RADIO_DIO1 6   // GPIO6 (DIO1 for SX1262)
+#define RADIO_BUSY 3   // GPIO3 (BUSY for SX1262)
+#define RADIO_RST 2    // GPIO2 (RESET for SX1262/SX1278)
 
 // Radio instance - will be initialized to SX1262 by default
 Radio* radio = nullptr;
 
-// Battery monitor configuration
-#define MAX17043_SDA 32
-#define MAX17043_SCL 22
+// Battery monitor configuration for ESP32-S3
+#define MAX17043_SDA 41
+#define MAX17043_SCL 40
 #define LOW_BATTERY_THRESHOLD 45.0
 MAX1704X batteryMonitor(0.00125f);
 
-// Touch screen configuration
-#define TOUCH_CS 21
-XPT2046_Touchscreen ts(TOUCH_CS);
+// Touch screen configuration for ESP32-S3
+#define TOUCH_CS 7
+#define TOUCH_IRQ 8
+XPT2046_Touchscreen ts(TOUCH_CS, TOUCH_IRQ);
 // Initialize TFT display
 TFT_eSPI tft = TFT_eSPI();
 // Create the display manager instance
@@ -57,8 +58,8 @@ unsigned long lastFrequencyAckTime = 0;
 const unsigned long FREQUENCY_ACK_INTERVAL = 500; // Send frequency ack every 500ms until confirmed
 bool listeningForAnnouncements = true; // Start by listening for frequency announcements
 
-// SD card configuration
-#define SD_CS 33 // SD card CS pin on TFT shield
+// SD card configuration for ESP32-S3
+#define SD_CS 38 // SD card CS pin for ESP32-S3
 bool sdCardAvailable = false;
 
 // Logging variables
@@ -143,63 +144,99 @@ void createLogFiles(uint32_t transmitterId, uint32_t bootTime) {
 
 void setup() {
     Serial.begin(115200);
+    delay(1000); // Give serial time to initialize
+    Serial.println("\n\nRocket Telemetry Receiver Starting...");
     
-    // Initialize I2C for battery monitor
-    Wire.begin(MAX17043_SDA, MAX17043_SCL);
-    
-    // Initialize battery monitor
-    batteryMonitor.reset();
-    batteryMonitor.quickstart();
-    if (!batteryMonitor.begin()) {
-        Serial.println("Failed to initialize battery monitor!");
-    } else {
-        Serial.println("Battery monitor initialized successfully");
-        display.setReceiverBatteryPercent(batteryMonitor.percent());
-        Serial.print("Initial battery: ");
-        Serial.print(display.getReceiverBatteryPercent());
-        Serial.println("%");
-    }
-    
-    // Initialize the display manager
+    // Initialize the display manager first (most important component)
+    Serial.println("Initializing display...");
     display.begin();
+    Serial.println("Display initialized");
     
-    // Initialize SD card
-    Serial.print("Initializing SD card... ");
-    if (SD.begin(SD_CS)) {
-        Serial.println("SD card initialized successfully");
-        sdCardAvailable = true;
-    } else {
-        Serial.println("SD card initialization failed");
-        sdCardAvailable = false;
-    }
+    // Set a default battery percentage since we might not have a battery monitor
+    display.setReceiverBatteryPercent(100);
     
-    // Initialize radio (SX1262 by default)
-    Serial.print(F("[Radio] Initializing SX1262 ... "));
-    radio = new SX1262Radio(RADIO_CS, RADIO_RST, RADIO_DIO1, RADIO_BUSY);
-    
-    if (!radio->begin()) {
-        Serial.println(F("failed! Trying SX1278..."));
+    // Only try to initialize I2C and battery monitor if ENABLE_BATTERY_MONITOR is defined
+    #define ENABLE_BATTERY_MONITOR 0
+    #if ENABLE_BATTERY_MONITOR
+        Serial.println("Initializing I2C for battery monitor...");
+        Wire.begin(MAX17043_SDA, MAX17043_SCL);
         
-        // Try SX1278 as fallback
-        delete radio;
-        radio = new SX1278Radio(RADIO_CS, RADIO_RST, RADIO_DIO0);
-        Serial.print(F("[Radio] Initializing SX1278 ... "));
+        // Initialize battery monitor
+        Serial.println("Initializing battery monitor...");
+        batteryMonitor.reset();
+        batteryMonitor.quickstart();
+        if (!batteryMonitor.begin()) {
+            Serial.println("Failed to initialize battery monitor!");
+        } else {
+            Serial.println("Battery monitor initialized successfully");
+            display.setReceiverBatteryPercent(batteryMonitor.percent());
+            Serial.print("Initial battery: ");
+            Serial.print(display.getReceiverBatteryPercent());
+            Serial.println("%");
+        }
+    #else
+        Serial.println("Battery monitor disabled");
+    #endif
+    
+    // Initialize SD card if ENABLE_SD_CARD is defined
+    #define ENABLE_SD_CARD 0
+    #if ENABLE_SD_CARD
+        Serial.print("Initializing SD card... ");
+        if (SD.begin(SD_CS)) {
+            Serial.println("SD card initialized successfully");
+            sdCardAvailable = true;
+        } else {
+            Serial.println("SD card initialization failed");
+            sdCardAvailable = false;
+        }
+    #else
+        Serial.println("SD card disabled");
+        sdCardAvailable = false;
+    #endif
+    
+    // Initialize radio if ENABLE_RADIO is defined
+    #define ENABLE_RADIO 0
+    #if ENABLE_RADIO
+        Serial.print(F("[Radio] Initializing SX1262 ... "));
+        radio = new SX1262Radio(RADIO_CS, RADIO_RST, RADIO_DIO1, RADIO_BUSY);
         
         if (!radio->begin()) {
-            Serial.println(F("failed! Trying CC1101..."));
+            Serial.println(F("failed! Trying SX1278..."));
             
-            // Try CC1101 as last resort
+            // Try SX1278 as fallback
             delete radio;
-            radio = new CC1101Radio(RADIO_CS, RADIO_DIO0, RADIOLIB_NC);
-            Serial.print(F("[Radio] Initializing CC1101 ... "));
+            radio = new SX1278Radio(RADIO_CS, RADIO_RST, RADIO_DIO0);
+            Serial.print(F("[Radio] Initializing SX1278 ... "));
             
             if (!radio->begin()) {
-                Serial.println(F("failed! No radio initialized."));
-                while (true);
+                Serial.println(F("failed! Trying CC1101..."));
+                
+                // Try CC1101 as last resort
+                delete radio;
+                radio = new CC1101Radio(RADIO_CS, RADIO_DIO0, RADIOLIB_NC);
+                Serial.print(F("[Radio] Initializing CC1101 ... "));
+                
+                if (!radio->begin()) {
+                    Serial.println(F("failed! No radio initialized."));
+                    // Continue without radio instead of hanging
+                    radio = nullptr;
+                }
             }
         }
-    }
-    Serial.println(F("success!"));
+    #else
+        Serial.println("Radio disabled");
+        radio = nullptr;
+    #endif
+    
+    Serial.println("Setup complete!");
+}
+
+// Original radio initialization success message and configuration
+// (moved outside setup since we're now conditionally initializing the radio)
+void configureRadio() {
+    if (radio == nullptr) return;
+    
+    Serial.println(F("Radio initialized successfully!"));
     
     // Configure radio for the announcement frequency
     if (!radio->configure(radio->getAnnouncementFrequency(), 250.0, 14)) {
@@ -615,17 +652,18 @@ void loop() {
         millis() - lastAbortCommandTime >= 100) { // 100ms - much more frequent than buzzer
         // Create and send abort command packet directly instead of calling sendAbortCommand
         // to avoid the multiple transmissions within that function (we're already sending frequently)
-        CommandPacket packet;
-        packet.version = PROTOCOL_VERSION;
-        packet.packetType = PACKET_TYPE_COMMAND;
-        packet.subType = COMMAND_SUBTYPE_ABORT;
-        packet.transmitterId = display.getSelectedTransmitterId();
-        packet.commandParam = 1; // 1 = activate abort
-        packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
-        
-        // Send the packet once (we'll send again in 100ms)
-        radio->transmit((uint8_t*)&packet, sizeof(packet));
-        
+        if (radio != nullptr) {
+            CommandPacket packet;
+            packet.version = PROTOCOL_VERSION;
+            packet.packetType = PACKET_TYPE_COMMAND;
+            packet.subType = COMMAND_SUBTYPE_ABORT;
+            packet.transmitterId = display.getSelectedTransmitterId();
+            packet.commandParam = 1; // 1 = activate abort
+            packet.checksum = calculateChecksum((uint8_t*)&packet, sizeof(packet) - 1);
+            
+            // Send the packet once (we'll send again in 100ms)
+            radio->transmit((uint8_t*)&packet, sizeof(packet));
+        }
         lastAbortCommandTime = millis();
     }
     
@@ -633,7 +671,9 @@ void loop() {
     // This ensures the command isn't lost due to packet loss
     if (currentBuzzerState && display.isRocketSelected() && 
         millis() - lastBuzzerCommandTime >= 5000) { // 5 seconds
-        sendBuzzerCommand(display.getSelectedTransmitterId(), true);
+        if (radio != nullptr) {
+            sendBuzzerCommand(display.getSelectedTransmitterId(), true);
+        }
         lastBuzzerCommandTime = millis();
         Serial.println("Resending buzzer ON command");
     }
@@ -663,7 +703,11 @@ void loop() {
     }
     
     uint8_t data[MAX_PACKET_SIZE];
-    int packetSize = radio->receive(data, MAX_PACKET_SIZE);
+    int packetSize = 0;
+    
+    if (radio != nullptr) {
+        packetSize = radio->receive(data, MAX_PACKET_SIZE);
+    }
     
     if (packetSize > 0) {
         // Check packet version
@@ -709,14 +753,19 @@ void loop() {
             }
             
             // Get SNR from radio
-            float snr = radio->getSNR();
+            float snr = 0.0f;
+            if (radio != nullptr) {
+                snr = radio->getSNR();
+            }
             display.lastSnr = snr;
             display.packetCount++;
             display.lastPacketTime = millis();
             
             // Send SNR feedback periodically
             if (millis() - lastSnrFeedbackTime >= SNR_FEEDBACK_INTERVAL) {
-                sendSnrFeedback();
+                if (radio != nullptr) {
+                    sendSnrFeedback();
+                }
                 lastSnrFeedbackTime = millis();
             }
         }

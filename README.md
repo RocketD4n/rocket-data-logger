@@ -82,49 +82,60 @@ PRIMARY_RELAY | GPIO5        | D1
 BACKUP_RELAY  | GPIO4        | D2
 ```
 
-### ESP32 Receiver Wiring
+### ESP32-S3-N16R8 Receiver Wiring
 
-#### TFT Display (ILI9341)
+#### TFT Display (ILI9341 240x320)
 ```
-TFT Pin             | ESP32 GPIO Pin
--------------------|---------------
-MISO (SDO/OUT)     | GPIO19 (VSPI MISO)
-MOSI (SDI/IN/SDA)  | GPIO23 (VSPI MOSI)
-SCLK (SCK/CLK)     | GPIO18 (VSPI SCK)
-CS (Chip Select)   | GPIO15
-DC/RS (Data/Command)| GPIO2
-RST (Reset)        | GPIO4
+TFT Pin             | ESP32-S3 GPIO Pin
+-------------------|------------------
+MISO (SDO/OUT)     | GPIO13
+MOSI (SDI/IN/SDA)  | GPIO11
+SCLK (SCK/CLK)     | GPIO12
+CS (Chip Select)   | GPIO10
+DC/RS (Data/Command)| GPIO9
+RST (Reset)        | GPIO14
 ```
 
-**Note:** If your display uses parallel mode (with LCD_RS, LCD_WR, LCD_RD pins), you'll need a different configuration. This project uses SPI mode. The DC pin is equivalent to the LCD_RS (Register Select) pin in parallel mode.
+**Note:** This project uses SPI mode for the display. The DC pin is equivalent to the LCD_RS (Register Select) pin in parallel mode displays.
 
 #### Touch Controller (XPT2046)
 ```
-Touch Pin  | ESP32 GPIO Pin
------------|---------------
-CS         | GPIO21
-MISO       | GPIO19 (shared with TFT)
-MOSI       | GPIO23 (shared with TFT)
-SCLK       | GPIO18 (shared with TFT)
+Touch Pin  | ESP32-S3 GPIO Pin
+-----------|------------------
+T_CS       | GPIO7
+T_IRQ      | GPIO8
+T_CLK      | GPIO12 (shared with TFT SCLK)
+T_DIN      | GPIO11 (shared with TFT MOSI)
+T_D0       | GPIO13 (shared with TFT MISO)
+```
+
+#### SD Card Module
+```
+SD Card Pin | ESP32-S3 GPIO Pin
+------------|------------------
+SD_CS       | GPIO38
+SD_MOSI     | GPIO11 (shared with TFT)
+SD_MISO     | GPIO13 (shared with TFT)
+SD_SCK      | GPIO12 (shared with TFT)
 ```
 
 #### Radio Module (SX1262/SX1278/CC1101)
 ```
-Radio Pin  | ESP32 GPIO Pin
------------|---------------
+Radio Pin  | ESP32-S3 GPIO Pin
+-----------|------------------
 CS         | GPIO5
 DIO0/GDO0  | GPIO4  (for SX1278/CC1101)
-DIO1       | GPIO25 (for SX1262)
-BUSY       | GPIO26 (for SX1262)
-RST        | GPIO27 (for SX1262/SX1278)
+DIO1       | GPIO6  (for SX1262)
+BUSY       | GPIO3  (for SX1262)
+RST        | GPIO2  (for SX1262/SX1278)
 ```
 
 #### Battery Monitor (MAX17043)
 ```
-MAX17043 Pin | ESP32 GPIO Pin
--------------|---------------
-SDA          | GPIO32
-SCL          | GPIO22
+MAX17043 Pin | ESP32-S3 GPIO Pin
+-------------|------------------
+SDA          | GPIO41
+SCL          | GPIO40
 ```
 
 ## Display Layout

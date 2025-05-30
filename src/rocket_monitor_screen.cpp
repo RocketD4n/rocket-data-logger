@@ -29,13 +29,23 @@ RocketMonitorScreen::RocketMonitorScreen(TFT_eSPI& tft, XPT2046_Touchscreen& ts)
 void RocketMonitorScreen::begin() {
     // Initialize display
     tft.init();
-    tft.setRotation(3); // Landscape
+    tft.setRotation(1); // Landscape for 240x320 display (portrait would be 0)
     tft.fillScreen(TFT_BLACK);
     tft.setTextDatum(TL_DATUM);
        
     // Initialize touch screen
     ts.begin();
-    ts.setRotation(3);
+    ts.setRotation(1); // Match display rotation
+    
+    // Initialize SD card if SD_CS is defined
+#ifdef SD_CS
+    if (!SD.begin(SD_CS)) {
+        Serial.println("SD Card initialization failed!");
+        // Continue without SD card
+    } else {
+        Serial.println("SD Card initialized successfully");
+    }
+#endif
     
     // Initialize rocket names storage
     rocketNamesStorage.begin("rockets", false);
