@@ -123,7 +123,7 @@ SD_SCK      | GPIO12 (shared with TFT)
 ```
 Radio Pin  | ESP32-S3 GPIO Pin
 -----------|------------------
-CS         | GPIO5
+CS/NSS     | GPIO5
 DIO0/GDO0  | GPIO4  (for SX1278/CC1101)
 DIO1       | GPIO6  (for SX1262)
 BUSY       | GPIO3  (for SX1262)

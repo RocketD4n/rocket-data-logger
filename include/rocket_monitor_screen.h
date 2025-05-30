@@ -2,7 +2,8 @@
 #define ROCKET_MONITOR_SCREEN_H
 
 #include <Arduino.h>
-#include <TFT_eSPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ILI9341.h>
 #include <XPT2046_Touchscreen.h>
 #include <Preferences.h>
 #include <SD.h>
@@ -13,7 +14,7 @@ class Radio;
 class RocketMonitorScreen {
 public:
     // Constructor
-    RocketMonitorScreen(TFT_eSPI& tft, XPT2046_Touchscreen& ts);
+    RocketMonitorScreen(Adafruit_ILI9341& tft, XPT2046_Touchscreen& ts);
     
     // Initialization
     void begin();
@@ -42,22 +43,22 @@ public:
     static const int BATTERY_ICON_HEIGHT = 12;
     static const int VALUE_HEIGHT = 26;
     static const int RIGHT_COL = 130;  // Adjusted for narrower display width
-    static const uint16_t LABEL_COLOR = TFT_YELLOW;
-    static const uint16_t VALUE_COLOR = TFT_WHITE;
+    static const uint16_t LABEL_COLOR = ILI9341_YELLOW;
+    static const uint16_t VALUE_COLOR = ILI9341_WHITE;
     
     // Navigation button constants
     static const int NAV_BUTTON_WIDTH = 30;  // Smaller buttons for narrower display
     static const int NAV_BUTTON_HEIGHT = 30;
     static const int NAV_BUTTON_MARGIN = 5;
-    static const uint16_t NAV_BUTTON_COLOR = TFT_BLUE;
+    static const uint16_t NAV_BUTTON_COLOR = ILI9341_BLUE;
     
     // Graph constants
     static const int GRAPH_X = 30;  // Adjusted for narrower display
     static const int GRAPH_Y = 60;  // More vertical space available
     static const int GRAPH_WIDTH = 180;  // Narrower graph
     static const int GRAPH_HEIGHT = 180;  // Taller graph for better use of portrait orientation
-    static const uint16_t GRAPH_COLOR = TFT_GREEN;
-    static const uint16_t AXIS_COLOR = TFT_WHITE;
+    static const uint16_t GRAPH_COLOR = ILI9341_GREEN;
+    static const uint16_t AXIS_COLOR = ILI9341_WHITE;
     
     // Keyboard constants
     static const int KEY_WIDTH = 30;
@@ -211,7 +212,7 @@ public:
     
 private:
     // References to external objects
-    TFT_eSPI& tft;
+    Adafruit_ILI9341& tft;
     XPT2046_Touchscreen& ts;
     Preferences rocketNamesStorage; // For storing rocket names
     Preferences lastPositionsStorage; // For storing last known positions
@@ -250,7 +251,7 @@ private:
     // Graph configuration
     const char* graphTitles[3] = {"Altitude vs Time", "Speed vs Time", "TX Power vs Time"};
     const char* graphYLabels[3] = {"Altitude (m)", "Speed (m/s)", "Power (dBm)"};
-    const uint16_t graphColors[3] = {TFT_GREEN, TFT_CYAN, TFT_YELLOW};
+    const uint16_t graphColors[3] = {ILI9341_GREEN, ILI9341_CYAN, ILI9341_YELLOW};
 };
 
 #endif // ROCKET_MONITOR_SCREEN_H

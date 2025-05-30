@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <SPI.h>
-#include <TFT_eSPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ILI9341.h>
 #include <XPT2046_Touchscreen.h>
 #include <Wire.h>
 #include <MAX1704X.h>
@@ -23,17 +24,28 @@
 Radio* radio = nullptr;
 
 // Battery monitor configuration for ESP32-S3
-#define MAX17043_SDA 41
-#define MAX17043_SCL 40
+#define MAX17043_SDA 41  // SDA pin
+#define MAX17043_SCL 40  // SCL pin
 #define LOW_BATTERY_THRESHOLD 45.0
 MAX1704X batteryMonitor(0.00125f);
+bool batteryMonitorEnabled = false;
+
+// Display configuration for ESP32-S3
+#define TFT_CS    10
+#define TFT_DC     9
+#define TFT_MOSI  11
+#define TFT_CLK   12
+#define TFT_RST   14
+#define TFT_MISO  13
 
 // Touch screen configuration for ESP32-S3
 #define TOUCH_CS 7
 #define TOUCH_IRQ 8
 XPT2046_Touchscreen ts(TOUCH_CS, TOUCH_IRQ);
+
 // Initialize TFT display
-TFT_eSPI tft = TFT_eSPI();
+Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_MOSI, TFT_CLK, TFT_RST, TFT_MISO);
+
 // Create the display manager instance
 RocketMonitorScreen display(tft, ts);
 
@@ -155,28 +167,13 @@ void setup() {
     // Set a default battery percentage since we might not have a battery monitor
     display.setReceiverBatteryPercent(100);
     
-    // Only try to initialize I2C and battery monitor if ENABLE_BATTERY_MONITOR is defined
+    // Battery monitor is disabled to prevent crashes
     #define ENABLE_BATTERY_MONITOR 0
-    #if ENABLE_BATTERY_MONITOR
-        Serial.println("Initializing I2C for battery monitor...");
-        Wire.begin(MAX17043_SDA, MAX17043_SCL);
-        
-        // Initialize battery monitor
-        Serial.println("Initializing battery monitor...");
-        batteryMonitor.reset();
-        batteryMonitor.quickstart();
-        if (!batteryMonitor.begin()) {
-            Serial.println("Failed to initialize battery monitor!");
-        } else {
-            Serial.println("Battery monitor initialized successfully");
-            display.setReceiverBatteryPercent(batteryMonitor.percent());
-            Serial.print("Initial battery: ");
-            Serial.print(display.getReceiverBatteryPercent());
-            Serial.println("%");
-        }
-    #else
-        Serial.println("Battery monitor disabled");
-    #endif
+    
+    // Set a fixed battery percentage since we can't use the battery monitor
+    batteryMonitorEnabled = false;
+    display.setReceiverBatteryPercent(100);
+    Serial.println("Battery monitor disabled to prevent crashes");
     
     // Initialize SD card if ENABLE_SD_CARD is defined
     #define ENABLE_SD_CARD 0
@@ -678,18 +675,10 @@ void loop() {
         Serial.println("Resending buzzer ON command");
     }
     
-    // Read battery level
+    // Battery monitoring is disabled to prevent crashes
     static unsigned long lastBatteryCheck = 0;
-    if (millis() - lastBatteryCheck >= 10000) { // Check every 10 seconds
-        uint8_t batteryLevel = batteryMonitor.percent();
-        display.setReceiverBatteryPercent(batteryLevel);
-        display.drawBatteryIndicator(batteryLevel); // Update battery indicator
-        
-        // Check for low battery condition
-        if (batteryLevel < LOW_BATTERY_THRESHOLD) {
-            lowBatteryShutdown();
-        }
-        
+    if (millis() - lastBatteryCheck >= 10000) {
+        // Just update the timestamp
         lastBatteryCheck = millis();
     }
     
