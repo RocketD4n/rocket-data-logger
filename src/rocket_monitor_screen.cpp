@@ -27,40 +27,73 @@ RocketMonitorScreen::RocketMonitorScreen(TFT_eSPI& tft, XPT2046_Touchscreen& ts)
 
 // Initialization
 void RocketMonitorScreen::begin() {
-    // Initialize display
-    tft.init();
-    tft.setRotation(1); // Landscape for 240x320 display (portrait would be 0)
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextDatum(TL_DATUM);
-       
-    // Initialize touch screen
-    ts.begin();
-    ts.setRotation(1); // Match display rotation
+    Serial.println("Display init: Starting TFT initialization");
     
-    // Initialize SD card if SD_CS is defined
-#ifdef SD_CS
-    if (!SD.begin(SD_CS)) {
-        Serial.println("SD Card initialization failed!");
-        // Continue without SD card
-    } else {
-        Serial.println("SD Card initialized successfully");
+    // Initialize display with error handling
+    try {
+        // Safer initialization with delays
+        delay(100); // Give hardware time to stabilize
+        
+        // Initialize with specific SPI settings
+        SPI.begin(TFT_SCLK, TFT_MISO, TFT_MOSI, TFT_CS);
+        Serial.println("Display init: SPI initialized");
+        
+        delay(100);
+        
+        // Initialize display
+        tft.init();
+        Serial.println("Display init: TFT initialized");
+        
+        delay(50);
+        
+        tft.setRotation(1); // Landscape for 240x320 display (portrait would be 0)
+        Serial.println("Display init: Rotation set");
+        
+        delay(50);
+        
+        tft.fillScreen(TFT_BLACK);
+        Serial.println("Display init: Screen filled");
+        
+        tft.setTextDatum(TL_DATUM);
+        Serial.println("Display init: Text datum set");
+        
+        // Initialize touch screen with error handling
+        Serial.println("Display init: Starting touch initialization");
+        ts.begin();
+        ts.setRotation(1); // Match display rotation
+        Serial.println("Display init: Touch initialized");
+    } catch (...) {
+        Serial.println("Display init: Error during display initialization");
+        // Continue even if display initialization fails
     }
-#endif
     
     // Initialize rocket names storage
+    Serial.println("Display init: Initializing preferences storage");
     rocketNamesStorage.begin("rockets", false);
     rocketNamesStorage.end();
     
     // Initialize last positions storage
     lastPositionsStorage.begin("lastpos", false);
     lastPositionsStorage.end();
+    Serial.println("Display init: Preferences initialized");
     
     // Load saved rocket names
+    Serial.println("Display init: Loading rocket names");
     loadRocketNames();
     
     // Set initial page and draw it
+    Serial.println("Display init: Setting initial page");
     currentPage = PAGE_TRANSMITTER_SELECTION;
-    drawTransmitterSelectionPage();
+    
+    // Try to draw the initial page, but don't crash if it fails
+    try {
+        drawTransmitterSelectionPage();
+        Serial.println("Display init: Initial page drawn");
+    } catch (...) {
+        Serial.println("Display init: Error drawing initial page");
+    }
+    
+    Serial.println("Display init: Complete");
 }
 
 void RocketMonitorScreen::sleepDisplay() {

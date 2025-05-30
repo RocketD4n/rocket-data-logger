@@ -1,5 +1,9 @@
 #define USER_SETUP_INFO "User_Setup"
 
+// Define ESP32-S3 explicitly to ensure proper pin mapping
+#define ESP32S3
+
+// Display driver
 #define ILI9341_DRIVER
 
 // ESP32-S3-N16R8 SPI pins for ILI9341 display
@@ -8,7 +12,10 @@
 #define TFT_SCLK 12  // ESP32-S3 GPIO12
 #define TFT_CS   10  // ESP32-S3 GPIO10
 #define TFT_DC    9  // ESP32-S3 GPIO9
-#define TFT_RST  14  // ESP32-S3 GPIO14
+#define TFT_RST  -1  // Set to -1 to disable reset pin usage
+
+// Define default SPI for TFT (VSPI or HSPI)
+#define TFT_SPI_PORT 1  // 0 = VSPI, 1 = HSPI on ESP32-S3
 
 // Touch screen pins for XPT2046 touch controller
 #define TOUCH_CS 7   // ESP32-S3 GPIO7
