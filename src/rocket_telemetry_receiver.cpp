@@ -192,33 +192,95 @@ void setup() {
     #endif
     
     // Initialize radio if ENABLE_RADIO is defined
-    #define ENABLE_RADIO 0
+    #define ENABLE_RADIO 1
     #if ENABLE_RADIO
-        Serial.print(F("[Radio] Initializing SX1262 ... "));
-        radio = new SX1262Radio(RADIO_CS, RADIO_RST, RADIO_DIO1, RADIO_BUSY);
+        Serial.println(F("[Radio] Starting SX1278 radio initialization"));
+        Serial.println(F("Make sure SX1278 is connected to the same SPI bus as the display:"));
+        Serial.println(F("- SCK: Pin 12"));
+        Serial.println(F("- MISO: Pin 13"));
+        Serial.println(F("- MOSI: Pin 11"));
+        Serial.print(F("Module-specific pins - CS: ")); Serial.print(RADIO_CS);
+        Serial.print(F(", RST: ")); Serial.print(RADIO_RST);
+        Serial.print(F(", DIO0: ")); Serial.println(RADIO_DIO0);
         
-        if (!radio->begin()) {
-            Serial.println(F("failed! Trying SX1278..."));
+        // Add a delay before initializing SPI for radio
+        delay(200);
+        
+        // Initialize SX1278 directly since we know that's what's connected
+        radio = new SX1278Radio(RADIO_CS, RADIO_RST, RADIO_DIO0);
+        Serial.print(F("[Radio] Initializing SX1278 ... "));
+        
+        // Try with different settings if needed
+        int initAttempts = 0;
+        bool radioInitialized = false;
+        
+        while (!radioInitialized && initAttempts < 3) {
+            initAttempts++;
+            Serial.print(F("Attempt ")); Serial.print(initAttempts); Serial.print(F(": "));
             
-            // Try SX1278 as fallback
-            delete radio;
-            radio = new SX1278Radio(RADIO_CS, RADIO_RST, RADIO_DIO0);
-            Serial.print(F("[Radio] Initializing SX1278 ... "));
+            radioInitialized = radio->begin();
             
-            if (!radio->begin()) {
-                Serial.println(F("failed! Trying CC1101..."));
+            if (radioInitialized) {
+                Serial.println(F("success!"));
+                Serial.println(F("SX1278 radio initialized successfully"));
                 
-                // Try CC1101 as last resort
-                delete radio;
-                radio = new CC1101Radio(RADIO_CS, RADIO_DIO0, RADIOLIB_NC);
-                Serial.print(F("[Radio] Initializing CC1101 ... "));
+                // Use the SX1278Radio's configure method
+                Serial.println(F("Configuring SX1278 radio"));
                 
-                if (!radio->begin()) {
-                    Serial.println(F("failed! No radio initialized."));
-                    // Continue without radio instead of hanging
-                    radio = nullptr;
+                // Set up configuration parameters
+                float freq = 433.0;  // Default frequency in MHz
+                float bw = 125.0;    // Bandwidth in kHz
+                int8_t power = 10;   // Output power in dBm
+                
+                Serial.print(F("Configuring with frequency: ")); Serial.print(freq);
+                Serial.print(F(" MHz, bandwidth: ")); Serial.print(bw);
+                Serial.print(F(" kHz, power: ")); Serial.print(power); Serial.println(F(" dBm"));
+                
+                // Try to configure the radio
+                bool configSuccess = radio->configure(freq, bw, power);
+                
+                if (configSuccess) {
+                    Serial.println(F("Radio configured successfully!"));
+                    Serial.print(F("Listening on ")); Serial.print(freq); Serial.println(F(" MHz"));
+                } else {
+                    Serial.println(F("Radio configuration failed with default parameters"));
+                    
+                    // Try with more conservative settings
+                    bw = 62.5;  // More conservative bandwidth
+                    power = 5;   // Lower power
+                    
+                    Serial.print(F("Trying more conservative settings - bandwidth: ")); Serial.print(bw);
+                    Serial.print(F(" kHz, power: ")); Serial.print(power); Serial.println(F(" dBm"));
+                    
+                    configSuccess = radio->configure(freq, bw, power);
+                    
+                    if (configSuccess) {
+                        Serial.println(F("Radio configured successfully with conservative settings!"));
+                        Serial.print(F("Listening on ")); Serial.print(freq); Serial.println(F(" MHz"));
+                    } else {
+                        Serial.println(F("Radio configuration still failed"));
+                        Serial.println(F("Will try to continue with default radio settings"));
+                        
+                        // Try setting just the output power as a last resort
+                        if (radio->setOutputPower(power)) {
+                            Serial.println(F("Output power set successfully"));
+                        } else {
+                            Serial.println(F("Output power setting failed"));
+                        }
+                    }
                 }
+            } else {
+                Serial.println(F("failed!"));
+                Serial.print(F("SX1278 initialization attempt ")); Serial.print(initAttempts); Serial.println(F(" failed"));
+                delay(300); // Longer delay between attempts
             }
+        }
+        
+        if (!radioInitialized) {
+            Serial.println(F("All SX1278 initialization attempts failed"));
+            Serial.println(F("Check connections and make sure SX1278 is properly connected to the SPI bus"));
+            delete radio;
+            radio = nullptr;
         }
     #else
         Serial.println("Radio disabled");
