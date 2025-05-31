@@ -18,15 +18,17 @@ Advantages of LVGL
 #include <TinyGPS++.h>
 #include <Adafruit_BMP085_U.h>
 #include <MAX1704X.h>
+#include <PCF8574.h>
+#include <SoftwareSerial.h>
 #include <algorithm> // For std::max
 #include "rocket_accelerometer.h"
 
-// Radio configuration pins
-#define RADIO_CS 16    // D0 on NodeMCU
-#define RADIO_DIO0 14  // D5 on NodeMCU (DIO0 for SX1278, GDO0 for CC1101)
-#define RADIO_DIO1 12  // D6 on NodeMCU (DIO1 for SX1262)
-#define RADIO_BUSY 13  // D7 on NodeMCU (BUSY for SX1262)
-#define RADIO_RST 15   // D8 on NodeMCU (RESET for SX1262/SX1278)
+// Radio configuration pins for ESP32-C3 SuperMini
+#define RADIO_CS 7     // GPIO7 on ESP32-C3
+#define RADIO_DIO0 2   // GPIO2 on ESP32-C3 (DIO0 for SX1278, GDO0 for CC1101)
+#define RADIO_DIO1 6   // GPIO6 on ESP32-C3 (DIO1 for SX1262)
+#define RADIO_BUSY 3   // GPIO3 on ESP32-C3 (BUSY for SX1262)
+#define RADIO_RST 1    // GPIO1 on ESP32-C3 (RESET for SX1262/SX1278)
 
 #include "rocket_telemetry_protocol.h"
 #include "cc1101_radio.h"
@@ -48,6 +50,15 @@ char line[256];
 
 // Accelerometer instance
 RocketAccelerometer accel;
+
+// PCF8574 I2C expander definitions
+#define PCF8574_ADDRESS 0x20  // Default address for PCF8574
+#define PRIMARY_RELAY_PIN 0   // P0 on PCF8574
+#define BACKUP_RELAY_PIN 1    // P1 on PCF8574
+#define BUZZER_PIN 2 // P2 on PCF8574 I2C expander
+
+// PCF8574 I2C expander instance
+PCF8574 pcf8574(PCF8574_ADDRESS);
 
 // Buzzer control variables
 bool buzzerActive = false;
@@ -76,30 +87,24 @@ unsigned long lastFrequencyAnnounceTime = 0;
 const unsigned long FREQUENCY_ANNOUNCE_INTERVAL = 2000; // Send frequency announcement every 2 seconds until acknowledged
 uint8_t radioType = 2;                     // 0=CC1101, 1=SX1278, 2=SX1262 (default)
 
-// RGB LED pins
-#define LED_RED_PIN 0    // D3 on NodeMCU
-#define LED_GREEN_PIN 2  // D4 on NodeMCU (Built-in LED)
-#define LED_BLUE_PIN 13  // D7 on NodeMCU
+// LED pin - using built-in LED on ESP32-C3 SuperMini
+#define LED_PIN 8  // Built-in LED on GPIO8
 
-// Buzzer pin - Using D10 (GPIO1/TX pin)
-// Note: This will disable Serial output when buzzer is active, but that's acceptable
-// for a recovery beacon that only activates after landing
-#define BUZZER_PIN 1    // D10 (TX) on NodeMCU
-
-#define PRIMARY_RELAY_PIN 5 // D1 on NodeMCU
-
-// LED color functions
-void setLedColor(bool red, bool green, bool blue) {
-    digitalWrite(LED_RED_PIN, red);          // Active high (external LED)
-    digitalWrite(LED_GREEN_PIN, green);      // Active high (external LED)
-    digitalWrite(LED_BLUE_PIN, blue);         // Active high (external LED)
+// LED functions for single LED
+void setLedOn() {
+    digitalWrite(LED_PIN, HIGH);  // Turn LED on
 }
 
-void setLedYellow() { setLedColor(true, true, false); }
-void setLedRed() { setLedColor(true, false, false); }
-void setLedGreen() { setLedColor(false, true, false); }
-void setLedBlue() { setLedColor(false, false, true); }
-#define BACKUP_RELAY_PIN 4 // D2 on NodeMCU
+void setLedOff() {
+    digitalWrite(LED_PIN, LOW);   // Turn LED off
+}
+
+// For compatibility with existing code, map color functions to on/off
+void setLedYellow() { setLedOn(); }
+void setLedRed() { setLedOn(); }
+void setLedGreen() { setLedOn(); }
+void setLedBlue() { setLedOn(); }
+// Backup relay pin now on PCF8574 I2C expander
 #define ALTITUDE_DROP_THRESHOLD 10.0f // meters
 #define BACKUP_DELAY 1000000 // 1 second in microseconds
 
@@ -137,7 +142,7 @@ uint32_t transmitterId = 0;
 void controlBuzzer(bool active) {
   Serial.print("Buzzer ");
   Serial.println(active ? "ON" : "OFF");
-  digitalWrite(BUZZER_PIN, active ? HIGH : LOW);
+  pcf8574.digitalWrite(BUZZER_PIN, active ? HIGH : LOW);
 }
 
 // Adjust transmission power based on SNR feedback
@@ -153,7 +158,13 @@ void adjustTransmissionPower(float snr) {
   // processSnrFeedbackAndAdjustPower method, which is called in the main loop
 }
 
+// GPS pins
+#define GPS_RX_PIN 3  // GPIO3 for RX
+#define GPS_TX_PIN 0  // GPIO0 for TX
+
+// GPS instance
 TinyGPSPlus gps;
+SoftwareSerial gpsSerial(GPS_RX_PIN, GPS_TX_PIN); // RX, TX
 
 char filename_base[24];
 
@@ -169,31 +180,30 @@ void setup() {
   Serial.begin(74880);
   Serial.println("Rocket Data Logger Initializing...");
   
-  // Get ESP8266 chip ID as transmitter ID
-  transmitterId = ESP.getChipId();
+  // Get ESP32-C3 chip ID as transmitter ID
+  transmitterId = ESP.getEfuseMac() & 0xFFFFFFFF;
   Serial.print("Transmitter ID: ");
   Serial.println(transmitterId, HEX);
   
-  // Initialize RGB LED pins
-  pinMode(LED_RED_PIN, OUTPUT);
-  pinMode(LED_GREEN_PIN, OUTPUT);
-  pinMode(LED_BLUE_PIN, OUTPUT);
-  setLedYellow();  // Yellow during initialization
+  // Initialize LED pin
+  pinMode(LED_PIN, OUTPUT);
+  setLedOn();  // LED on during initialization
   
   // Initialize buzzer pin
-  pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, LOW);  // Start with buzzer off
+  pcf8574.pinMode(BUZZER_PIN, OUTPUT);
+  pcf8574.digitalWrite(BUZZER_PIN, LOW);  // Start with buzzer off
 
-  // Initialize radio (SX1262 by default)
-  radio = new SX1262Radio(RADIO_CS, RADIO_RST, RADIO_DIO1, RADIO_BUSY);
+  // Initialize radio (SX1278 as primary)
+  radio = new SX1278Radio(RADIO_CS, RADIO_RST, RADIO_DIO0);
+  radioType = 1; // SX1278
   
   if (!radio->begin()) {
-    Serial.println("Failed to initialize SX1262 radio, trying SX1278...");
+    Serial.println("Failed to initialize SX1278 radio, trying SX1262...");
     
-    // Try SX1278 as fallback
+    // Try SX1262 as fallback
     delete radio;
-    radio = new SX1278Radio(RADIO_CS, RADIO_RST, RADIO_DIO0);
-    radioType = 1; // SX1278
+    radio = new SX1262Radio(RADIO_CS, RADIO_RST, RADIO_DIO1, RADIO_BUSY);
+    radioType = 2; // SX1262
     
     if (!radio->begin()) {
       Serial.println("Failed to initialize SX1278 radio, trying CC1101...");
@@ -234,15 +244,21 @@ void setup() {
   
   Serial.println("Radio initialized with transmitter ID: 0x" + String(transmitterId, HEX));
   
-  Wire.begin(D2, D1);
-  Serial.begin(74880);
+  Wire.begin(20, 21); // SDA=GPIO20, SCL=GPIO21
+  Serial.begin(115200);
   
 
-  // Initialize relay pins
-  pinMode(PRIMARY_RELAY_PIN, OUTPUT);
-  digitalWrite(PRIMARY_RELAY_PIN, LOW);  // Start with primary relay off
-  pinMode(BACKUP_RELAY_PIN, OUTPUT);
-  digitalWrite(BACKUP_RELAY_PIN, LOW);  // Start with backup relay off
+  // Initialize PCF8574 I2C expander for relay control
+  if (pcf8574.begin()) {
+    Serial.println("PCF8574 I2C expander initialized successfully");
+    // Set relay pins as outputs and turn them off
+    pcf8574.pinMode(PRIMARY_RELAY_PIN, OUTPUT);
+    pcf8574.digitalWrite(PRIMARY_RELAY_PIN, LOW);  // Start with primary relay off
+    pcf8574.pinMode(BACKUP_RELAY_PIN, OUTPUT);
+    pcf8574.digitalWrite(BACKUP_RELAY_PIN, LOW);  // Start with backup relay off
+  } else {
+    Serial.println("ERROR: Could not initialize PCF8574 I2C expander");
+  }
 
   Serial.println("Initializing MPU6050...");
   if (!accel.begin()) {
@@ -260,7 +276,7 @@ void setup() {
   Serial.println("BMP180 ready.");
   
   Serial.println("Initializing SD card");
-  if (!SD.begin(15)) {
+  if (!SD.begin(10)) { // SD Card CS on GPIO10
     Serial.println("Initialization failed!");
     setLedRed();  // Red indicates error
     while (1);
@@ -272,12 +288,12 @@ void setup() {
   Serial.println("MAX17043 ready.");
 
   Serial.println("Waiting for GPS....");
-  Serial.begin(9600);  // Hardware serial for GPS
+  gpsSerial.begin(9600);  // Software Serial for GPS on ESP32-C3 (RX=GPIO3, TX=GPIO0)
   
   // Wait for GPS fix and altitude
   while (true) {
-    while (Serial.available() > 0) {
-      gps.encode(Serial.read());
+    while (gpsSerial.available() > 0) {
+      gps.encode(gpsSerial.read());
     }
     
     if (gps.location.isUpdated() && gps.altitude.isValid()) {
@@ -305,15 +321,15 @@ void setup() {
   
  
   // Get GPS date and time
-  while (Serial.available() > 0) {
-    gps.encode(Serial.read());
+  while (gpsSerial.available() > 0) {
+    gps.encode(gpsSerial.read());
   }
   
   // Wait for valid date and time from GPS to set boot time
   unsigned long waitStart = millis();
   while (!gps.time.isValid() || !gps.date.isValid()) {
-    while (Serial.available() > 0) {
-      gps.encode(Serial.read());
+    while (gpsSerial.available() > 0) {
+      gps.encode(gpsSerial.read());
     }
     
     // Timeout after 30 seconds if we can't get valid time
@@ -379,8 +395,8 @@ void setup() {
 
 void sendGpsData() {
     // Get GPS data
-    while (Serial.available()) {
-        gps.encode(Serial.read());
+    while (gpsSerial.available()) {
+        gps.encode(gpsSerial.read());
     }
     
     if (gps.location.isValid()) {
@@ -588,8 +604,8 @@ void processCommandPacket(uint8_t* buffer, size_t length) {
     case COMMAND_SUBTYPE_ABORT:
       Serial.println("RECEIVED EMERGENCY ABORT COMMAND!");
       // Trigger immediate parachute deployment
-      digitalWrite(PRIMARY_RELAY_PIN, HIGH);
-      digitalWrite(BACKUP_RELAY_PIN, HIGH);
+      pcf8574.digitalWrite(PRIMARY_RELAY_PIN, HIGH);
+      pcf8574.digitalWrite(BACKUP_RELAY_PIN, HIGH);
       relayActive = true;
       primaryRelayActivationTime = micros();
       break;
@@ -733,13 +749,13 @@ void loop() {
   if (launchDetected) {
     if (!relayActive && altitude < lastAltitude - ALTITUDE_DROP_THRESHOLD) {
       relayActive = true;
-      digitalWrite(PRIMARY_RELAY_PIN, HIGH);
+      pcf8574.digitalWrite(PRIMARY_RELAY_PIN, HIGH);
       primaryRelayActivationTime = micros();
       Serial.println("Primary relay activated");
     }
     
     if (relayActive && micros() - primaryRelayActivationTime >= BACKUP_DELAY) {
-      digitalWrite(BACKUP_RELAY_PIN, HIGH);
+      pcf8574.digitalWrite(BACKUP_RELAY_PIN, HIGH);
       Serial.println("Backup relay activated");
     }
     
@@ -798,7 +814,7 @@ void loop() {
   if (relayActive) {
     unsigned long timeSincePrimary = millis() - primaryRelayActivationTime;
     if (timeSincePrimary >= BACKUP_DELAY) {
-      digitalWrite(BACKUP_RELAY_PIN, HIGH);
+      pcf8574.digitalWrite(BACKUP_RELAY_PIN, HIGH);
       Serial.println("Backup relay activated");
     }
   }
@@ -873,7 +889,7 @@ void loop() {
     
     // Only change the buzzer state if needed
     if (shouldBuzzerBeOn != buzzerCurrentlyOn) {
-      digitalWrite(BUZZER_PIN, shouldBuzzerBeOn ? HIGH : LOW);
+      pcf8574.digitalWrite(BUZZER_PIN, shouldBuzzerBeOn ? HIGH : LOW);
       buzzerCurrentlyOn = shouldBuzzerBeOn;
     }
   }

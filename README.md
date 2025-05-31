@@ -531,25 +531,37 @@ Each log entry includes a timestamp, allowing for accurate time-series analysis.
 
 ## Pin Configuration
 
-### Data Logger (NodeMCU) Pins
-| Function | NodeMCU Pin | GPIO |
-|----------|-------------|------|
-| Radio CS | D0 | 16 |
-| Radio DIO0/GDO0 | D5 | 14 |
-| Radio RST/DIO2 | D8 | 15 |
-| GPS RX | RX | 3 |
-| GPS TX | TX | 1 |
-| SD Card CS | D8 | 15 |
-| MPU6050 SDA | D2 | 4 |
-| MPU6050 SCL | D1 | 5 |
-| BMP180 SDA | D2 | 4 |
-| BMP180 SCL | D1 | 5 |
-| MAX17043 SDA | D2 | 4 |
-| MAX17043 SCL | D1 | 5 |
-| Primary Relay | D6 | 12 |
-| Backup Relay | D7 | 13 |
-| Buzzer | D10 | 1 |
-| LED | D4 | 2 |
+### Data Logger (ESP32-C3 SuperMini) Pins
+| Function | SX1278 Pin | ESP32-C3 GPIO |
+|----------|------------|---------------|
+| Radio NSS (Chip Select) | NSS | GPIO7 |
+| Radio DIO0 | D0 | GPIO2 |
+| Radio Reset | RST | GPIO1 |
+| Radio SCK | SCK | GPIO4 |
+| Radio MISO | MISO | GPIO5 |
+| Radio MOSI | MOSI | GPIO6 |
+| GPS RX | - | GPIO3 (RX) |
+| GPS TX | - | GPIO0 (TX) |
+| SD Card CS | - | GPIO10 |
+| SD Card MOSI | - | GPIO6 (shared with Radio) |
+| SD Card MISO | - | GPIO5 (shared with Radio) |
+| SD Card SCK | - | GPIO4 (shared with Radio) |
+| I2C SDA (MPU6050, BMP180, MAX17043) | - | GPIO20 |
+| I2C SCL (MPU6050, BMP180, MAX17043) | - | GPIO21 |
+| Primary Relay | - | PCF8574 P0 | 
+| Backup Relay | - | PCF8574 P1 |
+| Buzzer | - | PCF8574 P2 |
+| LED | - | Built-in LED (GPIO8) |
+
+**Important Notes:**
+1. The ESP32-C3 SuperMini has limited GPIO pins compared to the NodeMCU.
+2. The SPI bus (MOSI, MISO, SCK) is shared between the Radio and SD card to save pins.
+3. The built-in LED on GPIO8 is now free for use as an indicator.
+4. **PCF8574 I2C Expander**: 
+   - Used for relay and buzzer control to save GPIO pins
+   - Connected to the I2C bus on GPIO20 (SDA) and GPIO21 (SCL)
+   - Default I2C address: 0x20 (can be changed with A0-A2 pins if needed)
+   - Primary relay on P0, backup relay on P1, buzzer on P2
 
 ### Telemetry Receiver (ESP32) Pins
 | Function | ESP32 Pin | GPIO |
