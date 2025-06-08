@@ -15,6 +15,9 @@ protected:
     float currentPower = 10.0f;
     float operatingFrequency = 433.0f; // Default operating frequency
     
+    // Get the current operating frequency
+    float getFrequency() const { return operatingFrequency; }
+    
     // Local transmitter ID
     uint32_t transmitterId = 0;
     
@@ -47,6 +50,9 @@ protected:
 
 public:
     virtual ~Radio() = default;
+    
+    // Get the default operating frequency for this radio
+    virtual float getDefaultFrequency() const = 0;
     
     // Initialize and configure the radio
     virtual bool begin() = 0;

@@ -33,6 +33,9 @@ public:
     // Get the announcement frequency for CC1101 (433 MHz band)
     float getAnnouncementFrequency() override { return 433.0f; }
     
+    // Get the default operating frequency for CC1101
+    float getDefaultFrequency() const override { return 433.0f; }
+    
     // Use the default implementations from the Radio base class
     using Radio::processSnrFeedbackAndAdjustPower;
     using Radio::setAdaptivePowerParams;

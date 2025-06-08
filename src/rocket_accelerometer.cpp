@@ -1,4 +1,5 @@
 #include "rocket_accelerometer.h"
+#include "board_config.h"
 
 RocketAccelerometer::RocketAccelerometer() :
     accelVelocity(0.0f),
@@ -21,16 +22,102 @@ RocketAccelerometer::RocketAccelerometer() :
 }
 
 bool RocketAccelerometer::begin() {
-    // Initialize MPU6050
+    // First, scan I2C bus to see what devices are present
+    Serial.println("\nScanning I2C bus...");
+    byte error, address;
+    int nDevices = 0;
+    
+    for(address = 1; address < 127; address++) {
+        Wire.beginTransmission(address);
+        error = Wire.endTransmission();
+        
+        if (error == 0) {
+            Serial.print("I2C device found at address 0x");
+            if (address < 16) Serial.print("0");
+            Serial.print(address, HEX);
+            
+            // Identify common devices
+            if (address == 0x68 || address == 0x69) Serial.println(" (MPU6050)");
+            else if (address == 0x76 || address == 0x77) Serial.println(" (BMP180/280)");
+            else if (address == 0x36) Serial.println(" (MAX17043 Fuel Gauge)");
+            else Serial.println(" (Unknown device)");
+            
+            nDevices++;
+        }
+    }
+    
+    if (nDevices == 0) {
+        Serial.println("No I2C devices found! Check wiring.");
+    } else {
+        Serial.println("I2C scan complete.\n");
+    }
+    
+    // Initialize I2C bus with the correct pins
+    Wire.begin(I2C_SDA, I2C_SCL); // SDA=GPIO21, SCL=GPIO22 for ESP32
+    
+    // Initialize MPU6050 with default settings
     if (!mpu.begin()) {
-        Serial.println("MPU6050 initialization failed!");
+        Serial.println("Failed to find MPU6050 chip");
         return false;
     }
+    
+    // Set accelerometer range to +/- 16G (optional, uses default if not set)
+    mpu.setAccelerometerRange(MPU6050_RANGE_16_G);
+    
+    // Set gyro range to 2000 degrees/second (optional, uses default if not set)
+    mpu.setGyroRange(MPU6050_RANGE_2000_DEG);
+    
+    // Print configuration
+    Serial.println("MPU6050 initialized with default settings");
+    
+    // Optional: Print current configuration
+    Serial.print("Accelerometer range: ");
+    switch(mpu.getAccelerometerRange()) {
+        case MPU6050_RANGE_2_G:  Serial.println("+/- 2G"); break;
+        case MPU6050_RANGE_4_G:  Serial.println("+/- 4G"); break;
+        case MPU6050_RANGE_8_G:  Serial.println("+/- 8G"); break;
+        case MPU6050_RANGE_16_G: Serial.println("+/- 16G"); break;
+        default: Serial.println("Unknown");
+    }
+    
+    // Initialize variables for calibration
+    float sumX = 0, sumY = 0, sumZ = 0;
+    const int numSamples = 100;
+    float gravityVector[3] = {0};
+    
+    // Calibrate accelerometer
+    for (int i = 0; i < numSamples; i++) {
+        sensors_event_t a, g, temp;
+        mpu.getEvent(&a, &g, &temp);
+        
+        sumX += a.acceleration.x;
+        sumY += a.acceleration.y;
+        sumZ += a.acceleration.z;
+        delay(10);
+    }
+    
+    // Calculate average offset
+    gravityVector[0] = sumX / numSamples;
+    gravityVector[1] = sumY / numSamples;
+    gravityVector[2] = sumZ / numSamples;
+    
+    Serial.println("MPU6050 initialized successfully");
+    return true;
     
     Serial.println("MPU6050 ready!");
     
     // Set accelerometer range to +/- 16g for better high-acceleration measurements
     mpu.setAccelerometerRange(MPU6050_RANGE_16_G);
+    
+    // Verify the setting
+    Serial.print("Accelerometer range set to: ");
+    switch(mpu.getAccelerometerRange()) {
+        case MPU6050_RANGE_2_G: Serial.println("+/- 2G"); break;
+        case MPU6050_RANGE_4_G: Serial.println("+/- 4G"); break;
+        case MPU6050_RANGE_8_G: Serial.println("+/- 8G"); break;
+        case MPU6050_RANGE_16_G: Serial.println("+/- 16G"); break;
+        default: Serial.println("Unknown");
+    }
     
     return true;
 }

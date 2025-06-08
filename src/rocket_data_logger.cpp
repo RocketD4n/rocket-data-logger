@@ -1,6 +1,5 @@
 /*
  *  TODO:
- *  - receiver to offer binding options
  *  - LVGL graphics on reciever screen:
 Using LVGL (Light and Versatile Graphics Library) for rocket telemetry display could offer significant advantages over current TFT_eSPI implementation. 
 Advantages of LVGL
@@ -12,28 +11,95 @@ Advantages of LVGL
  */
  
 #include <Arduino.h>
-#include <Wire.h>
+#include "board_config.h"
+#include <ArduinoJson.h>
 #include <SPI.h>
 #include <SD.h>
+#include <Wire.h>
 #include <TinyGPS++.h>
+#include <RadioLib.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
 #include <Adafruit_BMP085_U.h>
 #include <MAX1704X.h>
 #include <PCF8574.h>
+
+#if USE_SOFTWARE_SERIAL_GPS
 #include <SoftwareSerial.h>
+#endif
+
 #include <algorithm> // For std::max
 #include "rocket_accelerometer.h"
 
-// Radio configuration pins for ESP32-C3 SuperMini
-#define RADIO_CS 7     // GPIO7 on ESP32-C3
-#define RADIO_DIO0 2   // GPIO2 on ESP32-C3 (DIO0 for SX1278, GDO0 for CC1101)
-#define RADIO_DIO1 6   // GPIO6 on ESP32-C3 (DIO1 for SX1262)
-#define RADIO_BUSY 3   // GPIO3 on ESP32-C3 (BUSY for SX1262)
-#define RADIO_RST 1    // GPIO1 on ESP32-C3 (RESET for SX1262/SX1278)
+// Radio configuration pins are defined in board_config.h
 
 #include "rocket_telemetry_protocol.h"
 #include "cc1101_radio.h"
 #include "sx1278_radio.h"
 #include "sx1262_radio.h"
+
+MAX1704X lipo(0.00125f);  // MAX17043 voltage resolution
+// Battery monitoring
+float batteryLevel = 0.0f;
+bool batteryMonitorAvailable = false;
+
+// Function to safely read battery level
+void updateBatteryLevel() {
+  static bool initialized = false;
+  static bool available = false;
+  static unsigned long lastReadTime = 0;
+  const unsigned long READ_INTERVAL = 60000; // Read once per minute
+  
+  // Only read at intervals
+  unsigned long currentTime = millis();
+  if (currentTime - lastReadTime < READ_INTERVAL && lastReadTime != 0) {
+    return;
+  }
+  lastReadTime = currentTime;
+  
+  // Try to initialize on first read
+  if (!initialized) {
+    initialized = true;
+    Wire.beginTransmission(0x36);
+    if (Wire.endTransmission() == 0) {
+      try {
+        lipo.reset();
+        delay(10);
+        lipo.quickstart();
+        delay(10);
+        available = true;
+        batteryMonitorAvailable = true;
+        Serial.println("MAX17043 initialized for battery monitoring");
+      } catch (...) {
+        available = false;
+        batteryMonitorAvailable = false;
+        Serial.println("Failed to initialize MAX17043");
+      }
+    } else {
+      available = false;
+      batteryMonitorAvailable = false;
+    }
+  }
+  
+  // Read battery level if available
+  if (available) {
+    try {
+      batteryLevel = lipo.percent();
+      Serial.print("Battery level: ");
+      Serial.print(batteryLevel);
+      Serial.println("%");
+      return;
+    } catch (...) {
+      available = false;
+      batteryMonitorAvailable = false;
+      Serial.println("Error reading battery level");
+    }
+  }
+  
+  // If we get here, reading failed
+  batteryLevel = 0.0f;
+  batteryMonitorAvailable = false;
+}
 
 // Radio instance - will be initialized to SX1262 by default
 Radio* radio = nullptr;
@@ -51,11 +117,7 @@ char line[256];
 // Accelerometer instance
 RocketAccelerometer accel;
 
-// PCF8574 I2C expander definitions
-#define PCF8574_ADDRESS 0x20  // Default address for PCF8574
-#define PRIMARY_RELAY_PIN 0   // P0 on PCF8574
-#define BACKUP_RELAY_PIN 1    // P1 on PCF8574
-#define BUZZER_PIN 2 // P2 on PCF8574 I2C expander
+// PCF8574 I2C expander definitions are in board_config.h
 
 // PCF8574 I2C expander instance
 PCF8574 pcf8574(PCF8574_ADDRESS);
@@ -80,36 +142,50 @@ float savedTxPower = txPower;         // Save power level before launch
 
 // Frequency scanning parameters
 const float FREQUENCY_SCAN_STEP = 100.0f;  // Step size in kHz for frequency scanning
-float operatingFrequency = 863.0f;         // Default operating frequency in MHz
-// Using radio->getAnnouncementFrequency() instead of hardcoded value
+float operatingFrequency = 0.0f;           // Will be initialized with radio's default frequency
+// Using radio->getDefaultFrequency() to get the default frequency for the current radio module
 bool frequencyAcknowledged = false;        // Whether the selected frequency has been acknowledged
 unsigned long lastFrequencyAnnounceTime = 0;
 const unsigned long FREQUENCY_ANNOUNCE_INTERVAL = 2000; // Send frequency announcement every 2 seconds until acknowledged
 uint8_t radioType = 2;                     // 0=CC1101, 1=SX1278, 2=SX1262 (default)
 
-// LED pin - using built-in LED on ESP32-C3 SuperMini
-#define LED_PIN 8  // Built-in LED on GPIO8
+// LED pin is defined in board_config.h
 
-// LED functions for single LED
-void setLedOn() {
-    digitalWrite(LED_PIN, HIGH);  // Turn LED on
-}
+// LED control functions using PCF8574
 
+// LED control functions using PCF8574
 void setLedOff() {
-    digitalWrite(LED_PIN, LOW);   // Turn LED off
+  pcf8574.digitalWrite(LED_RED_PIN, HIGH);   // Active LOW
+  pcf8574.digitalWrite(LED_GREEN_PIN, HIGH); // Active LOW
+  pcf8574.digitalWrite(LED_BLUE_PIN, HIGH);  // Active LOW
 }
 
-// For compatibility with existing code, map color functions to on/off
-void setLedYellow() { setLedOn(); }
-void setLedRed() { setLedOn(); }
-void setLedGreen() { setLedOn(); }
-void setLedBlue() { setLedOn(); }
+void setLedRed() {
+  setLedOff(); // Turn all off first
+  pcf8574.digitalWrite(LED_RED_PIN, LOW);    // Active LOW
+}
+
+void setLedGreen() {
+  setLedOff(); // Turn all off first
+  pcf8574.digitalWrite(LED_GREEN_PIN, LOW);  // Active LOW
+}
+
+void setLedBlue() {
+  setLedOff(); // Turn all off first
+  pcf8574.digitalWrite(LED_BLUE_PIN, LOW);   // Active LOW
+}
+
+void setLedYellow() {
+  setLedOff(); // Turn all off first
+  pcf8574.digitalWrite(LED_RED_PIN, LOW);    // Active LOW
+  pcf8574.digitalWrite(LED_GREEN_PIN, LOW);  // Active LOW
+}
+
 // Backup relay pin now on PCF8574 I2C expander
 #define ALTITUDE_DROP_THRESHOLD 10.0f // meters
 #define BACKUP_DELAY 1000000 // 1 second in microseconds
 
 Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
-MAX1704X lipo(0.00125f);  // MAX17043 voltage resolution
 File Textfile;
 float seaLevelPressure = 1013.25f; // Default value, will be updated with GPS altitude
 
@@ -158,13 +234,19 @@ void adjustTransmissionPower(float snr) {
   // processSnrFeedbackAndAdjustPower method, which is called in the main loop
 }
 
-// GPS pins
-#define GPS_RX_PIN 3  // GPIO3 for RX
-#define GPS_TX_PIN 0  // GPIO0 for TX
+// GPS pins are defined in board_config.h
 
 // GPS instance
 TinyGPSPlus gps;
-SoftwareSerial gpsSerial(GPS_RX_PIN, GPS_TX_PIN); // RX, TX
+
+#if USE_SOFTWARE_SERIAL_GPS
+// Use SoftwareSerial for GPS (ESP32-C3)
+SoftwareSerial gpsSerial(GPS_TX_PIN, GPS_RX_PIN); // RX, TX
+#define GPS_SERIAL gpsSerial
+#else
+// Use Hardware Serial2 for GPS (regular ESP32)
+#define GPS_SERIAL Serial2
+#endif
 
 char filename_base[24];
 
@@ -177,7 +259,7 @@ void getAltitudeAndTemp(float& altitude, float& temp) {
 
 void setup() {
   // Initialize serial communication
-  Serial.begin(74880);
+  Serial.begin(115200);
   Serial.println("Rocket Data Logger Initializing...");
   
   // Get ESP32-C3 chip ID as transmitter ID
@@ -186,8 +268,17 @@ void setup() {
   Serial.println(transmitterId, HEX);
   
   // Initialize LED pin
-  pinMode(LED_PIN, OUTPUT);
-  setLedOn();  // LED on during initialization
+  // Initialize PCF8574 and configure LED pins
+  if (!pcf8574.begin()) {
+    Serial.println("Failed to initialize PCF8574 expander! No relay, buzzer or LED will be available.");
+  }
+  
+  // Set LED pins as outputs (HIGH = OFF for common anode RGB LED)
+  pcf8574.pinMode(LED_RED_PIN, OUTPUT);
+  pcf8574.pinMode(LED_GREEN_PIN, OUTPUT);
+  pcf8574.pinMode(LED_BLUE_PIN, OUTPUT);
+  setLedOff();   // Initialize all LEDs to off
+  setLedBlue();  // Blue LED on during initialization
   
   // Initialize buzzer pin
   pcf8574.pinMode(BUZZER_PIN, OUTPUT);
@@ -196,6 +287,17 @@ void setup() {
   // Initialize radio (SX1278 as primary)
   radio = new SX1278Radio(RADIO_CS, RADIO_RST, RADIO_DIO0);
   radioType = 1; // SX1278
+  
+  // Perform hard reset
+  Serial.println(F("Performing hard radio reset..."));
+  pinMode(RADIO_RST, OUTPUT);
+  digitalWrite(RADIO_RST, LOW);
+  delay(10);
+  digitalWrite(RADIO_RST, HIGH);
+  delay(100);  // Give time for the radio to reset
+  Serial.println(F("  - Reset sequence completed"));
+  
+  Serial.println(F("3. Initializing radio..."));
   
   if (!radio->begin()) {
     Serial.println("Failed to initialize SX1278 radio, trying SX1262...");
@@ -206,7 +308,7 @@ void setup() {
     radioType = 2; // SX1262
     
     if (!radio->begin()) {
-      Serial.println("Failed to initialize SX1278 radio, trying CC1101...");
+      Serial.println("Failed to initialize SX1262 radio, trying CC1101...");
       
       // Try CC1101 as last resort
       delete radio;
@@ -216,14 +318,49 @@ void setup() {
       if (!radio->begin()) {
         Serial.println("Failed to initialize any radio");
         while (true) { delay(10); }
+      } else {
+        // Initialize operating frequency with CC1101's default
+        operatingFrequency = radio->getDefaultFrequency();
       }
+    } else {
+      // Initialize operating frequency with SX1262's default
+      operatingFrequency = radio->getDefaultFrequency();
     }
+  } else {
+    // Initialize operating frequency with SX1278's default
+    operatingFrequency = radio->getDefaultFrequency();
   }
   
   // First configure radio for the announcement frequency
-  if (!radio->configure(radio->getAnnouncementFrequency(), 250.0, 14)) {
-    Serial.println("Failed to configure radio for announcements");
-    while (true) { delay(10); }
+  Serial.println(F("\n=== Radio Configuration ==="));
+  Serial.print(F("Operating frequency: "));
+  Serial.println(operatingFrequency);
+  Serial.print(F("Announcement frequency: "));
+  float announceFreq = radio->getAnnouncementFrequency();
+  Serial.println(announceFreq);
+  
+  // Debug print radio type
+  Serial.print(F("Radio type: "));
+  if (radioType == 1) Serial.println(F("SX1278"));
+  else if (radioType == 2) Serial.println(F("SX1262"));
+  else if (radioType == 0) Serial.println(F("CC1101"));
+  
+  Serial.println(F("Data bandwidth: 250"));
+  Serial.println(F("Power: 14"));
+  
+  // Try to configure with debug info
+  Serial.println(F("Configuring radio with announcement frequency..."));
+  if (!radio->configure(announceFreq, 250.0, 14)) {
+    Serial.println(F("Failed to configure radio for announcements"));
+    Serial.println(F("Trying with operating frequency instead..."));
+    if (!radio->configure(operatingFrequency, 250.0, 14)) {
+      Serial.println(F("Failed to configure radio with operating frequency"));
+      while (true) { delay(10); }
+    } else {
+      Serial.println(F("Successfully configured with operating frequency"));
+    }
+  } else {
+    Serial.println(F("Successfully configured with announcement frequency"));
   }
   
   // Scan for a clear frequency
@@ -236,15 +373,21 @@ void setup() {
   Serial.print(operatingFrequency);
   Serial.println(" MHz");
   
-  // Configure adaptive power control
+  // Configure radio with the selected frequency
+  if (!radio->configure(operatingFrequency, 250.0, 14)) {
+    Serial.println("Failed to configure radio with selected frequency");
+    while (true) { delay(10); }
+  }
+  
+  // Set adaptive power control parameters
   radio->setAdaptivePowerParams(TARGET_SNR, SNR_HYSTERESIS, POWER_ADJUST_STEP);
   
-  // Set the transmitter ID in the radio for SNR feedback filtering
+  // Set transmitter ID for this device
   radio->setTransmitterId(transmitterId);
   
   Serial.println("Radio initialized with transmitter ID: 0x" + String(transmitterId, HEX));
   
-  Wire.begin(20, 21); // SDA=GPIO20, SCL=GPIO21
+  Wire.begin(I2C_SDA, I2C_SCL); // SDA and SCL pins from board_config.h
   Serial.begin(115200);
   
 
@@ -276,25 +419,236 @@ void setup() {
   Serial.println("BMP180 ready.");
   
   Serial.println("Initializing SD card");
-  if (!SD.begin(10)) { // SD Card CS on GPIO10
+  if (!SD.begin(SD_CS_PIN)) { // SD Card CS pin from board_config.h
     Serial.println("Initialization failed!");
     setLedRed();  // Red indicates error
     while (1);
   }
 
-  // Initialize MAX17043
-  lipo.reset();
-  lipo.quickstart();
-  Serial.println("MAX17043 ready.");
+  // Check for MAX17043 presence (non-blocking)
+  Serial.print("Checking for MAX17043... ");
+  bool batteryMonitorAvailable = false;
+  
+  // Simple I2C scan to check for device presence
+  // Check for MAX17043 presence (non-blocking)
+  Wire.beginTransmission(0x36);  // MAX17043 I2C address
+  if (Wire.endTransmission() == 0) {
+    Serial.println("found");
+  } else {
+    Serial.println("not found");
+  }
+  
+  // Note: We'll initialize the MAX17043 on-demand when reading battery level
+  // This prevents crashes during boot if the battery isn't connected
 
-  Serial.println("Waiting for GPS....");
-  gpsSerial.begin(9600);  // Software Serial for GPS on ESP32-C3 (RX=GPIO3, TX=GPIO0)
+  // Initialize GPS serial 
+  // Print GPS configuration
+  Serial.println("GPS Configuration:");
+  #if USE_SOFTWARE_SERIAL_GPS
+    Serial.println("- Using SoftwareSerial");
+  #else
+    Serial.println("- Using Hardware Serial2");
+  #endif
+  
+  // Try different baud rates to find the correct one
+  const long baudRates[] = {9600, 115200, 57600, 38400, 19200, 4800};
+  const int numBaudRates = sizeof(baudRates) / sizeof(baudRates[0]);
+  bool foundBaudRate = false;
+  
+  for (int i = 0; i < numBaudRates; i++) {
+    long currentBaud = baudRates[i];
+    
+    // Close and reopen serial port
+    GPS_SERIAL.end();
+    delay(100);
+    
+    #if !USE_SOFTWARE_SERIAL_GPS
+      GPS_SERIAL.begin(currentBaud, SERIAL_8N1, GPS_TX_PIN, GPS_RX_PIN);
+    #else
+      GPS_SERIAL.begin(currentBaud);
+    #endif
+    
+    delay(100);
+    
+    // Clear any buffered data
+    while (GPS_SERIAL.available() > 0) {
+      GPS_SERIAL.read();
+    }
+    
+    // Send a test command that should generate a response
+    GPS_SERIAL.println("$PMTK605*31");
+    
+    // Wait for response
+    unsigned long startTime = millis();
+    bool gotResponse = false;
+    
+    while (millis() - startTime < 500) {  // Wait up to 500ms for response
+      if (GPS_SERIAL.available() > 0) {
+        char c = GPS_SERIAL.read();
+        if (c == '$') {  // Start of NMEA sentence
+          gotResponse = true;
+          break;
+        }
+      }
+    }
+    
+    if (gotResponse) {
+      Serial.print("Found GPS at ");
+      Serial.print(currentBaud);
+      Serial.println(" baud");
+      foundBaudRate = true;
+      
+      // Configure GPS module
+      GPS_SERIAL.println("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28"); // GGA and RMC only
+      delay(100);
+      GPS_SERIAL.println("$PMTK220,200*2C"); // 5Hz update rate
+      delay(100);
+      GPS_SERIAL.println("$PMTK313,1*2E"); // Enable SBAS
+      delay(100);
+      
+      // Clear any remaining data
+      while (GPS_SERIAL.available() > 0) {
+        GPS_SERIAL.read();
+      }
+      
+      break;
+    } else {
+      Serial.print("No response at ");
+      Serial.print(currentBaud);
+      Serial.println(" baud");
+    }
+  }
+  
+  if (!foundBaudRate) {
+    Serial.println("Could not communicate with GPS module! Check wiring and power.");
+    Serial.println("Tried baud rates: 9600, 115200, 57600, 38400, 19200, 4800");
+    
+    // Blink LED to indicate error
+    while (true) {
+      digitalWrite(LED_BLUE_PIN, HIGH);
+      delay(100);
+      digitalWrite(LED_BLUE_PIN, LOW);
+      delay(100);
+    }
+  }
+  
+  // Initialize GPS serial with error checking
+  bool gpsSerialStarted = false;
+  
+  #if USE_SOFTWARE_SERIAL_GPS
+    Serial.println("Initializing SoftwareSerial for GPS...");
+    GPS_SERIAL.begin(9600);  // Software Serial for GPS on ESP32-C3
+    gpsSerialStarted = true;
+  #else
+    // Verify communication
+    unsigned long startTime = millis();
+    bool receivedData = false;
+  
+    while (millis() - startTime < 2000) { // Wait up to 2 seconds for data
+      if (GPS_SERIAL.available() > 0) {
+        receivedData = true;
+        break;
+      }
+      delay(10);
+    }
+  
+    if (receivedData) {
+      Serial.println("GPS configured successfully");
+      gpsSerialStarted = true;
+    } 
+  #endif
+  
+  if (!gpsSerialStarted) {
+    Serial.println("ERROR: Failed to initialize GPS serial!");
+    Serial.println("Please check the following:");
+    Serial.println("1. GPS module is properly connected to the correct pins");
+    Serial.println("2. GPS module is powered (check voltage levels)");
+    Serial.println("3. Correct baud rate is used (try 9600, 57600, 115200, or 4800)");
+    Serial.println("4. TX/RX pins are not swapped");
+    
+    while(1) {
+      // Blink blue LED to indicate error
+      digitalWrite(LED_BLUE_PIN, HIGH);
+      delay(100);
+      digitalWrite(LED_BLUE_PIN, LOW);
+      delay(900);
+      
+      // Still try to read GPS in case it starts working
+      if (GPS_SERIAL.available() > 0) {
+        char c = GPS_SERIAL.read();
+        if (c == '$') {  // Start of NMEA sentence
+          Serial.println("\nGPS data detected! Resuming...");
+          gpsSerialStarted = true;
+          break;
+        }
+      }
+    }
+  } else {
+    Serial.println("GPS serial initialized successfully");
+  }
   
   // Wait for GPS fix and altitude
+  unsigned long lastStatusTime = 0;
+  byte lastSatellites = 0;
+  unsigned long lastDataTime = millis();
+  
+  // Clear any buffered data
+  while (GPS_SERIAL.available() > 0) {
+    char c = GPS_SERIAL.read();
+    Serial.print(c);
+  } 
+  // Request GPS module version
+ // GPS_SERIAL.println("$PMTK605*31\r\n");
+  
   while (true) {
-    while (gpsSerial.available() > 0) {
-      gps.encode(gpsSerial.read());
+    // Process all available GPS data
+    while (GPS_SERIAL.available() > 0) {
+      lastDataTime = millis();
+      
+      // Read and process a byte
+      if (gps.encode(GPS_SERIAL.read())) {
+        // Got a complete NMEA sentence
+        static unsigned long lastPrint = 0;
+        if (millis() - lastPrint >= 1000) {  // Update status once per second
+          lastPrint = millis();
+          
+          // Print GPS status
+          if (gps.location.isValid()) {
+            Serial.print("Fix: ");
+            Serial.print(gps.satellites.value());
+            Serial.print(" sats, HDOP=");
+            Serial.print(gps.hdop.hdop(), 1);
+            Serial.print(", Lat=");
+            Serial.print(gps.location.lat(), 6);
+            Serial.print(", Lon=");
+            Serial.print(gps.location.lng(), 6);
+            Serial.print(", Alt=");
+            Serial.print(gps.altitude.meters());
+            Serial.println("m");
+            
+            // Toggle LED to show activity
+            static bool ledState = false;
+            digitalWrite(LED_BLUE_PIN, ledState ? HIGH : LOW);
+            ledState = !ledState;
+          } else {
+            Serial.println("Waiting for GPS fix...");
+          }
+        }
+      }
     }
+    
+    // Check for GPS timeout
+    if (millis() - lastDataTime > 5000) {
+      if (millis() - lastStatusTime >= 1000) {
+        lastStatusTime = millis();
+        Serial.print("No GPS data for ");
+        Serial.print((millis() - lastDataTime) / 1000);
+        Serial.println(" seconds");
+      }
+    }
+    
+    // Small delay to prevent busy-waiting
+    delay(1);
     
     if (gps.location.isUpdated() && gps.altitude.isValid()) {
       // Get current pressure
@@ -313,7 +667,9 @@ void setup() {
       Serial.print("Sea level pressure initialized: ");
       Serial.println(seaLevelPressure);
       Serial.print("Temperature: ");
-      Serial.println(currentTemperature);
+      Serial.print(currentTemperature);
+      Serial.print(" GPS Altitude: ");
+      Serial.println(gpsAltitudeMeters);
       break;
     }
     delay(1000);
@@ -321,15 +677,15 @@ void setup() {
   
  
   // Get GPS date and time
-  while (gpsSerial.available() > 0) {
-    gps.encode(gpsSerial.read());
+  while (GPS_SERIAL.available() > 0) {
+    gps.encode(GPS_SERIAL.read());
   }
   
   // Wait for valid date and time from GPS to set boot time
   unsigned long waitStart = millis();
   while (!gps.time.isValid() || !gps.date.isValid()) {
-    while (gpsSerial.available() > 0) {
-      gps.encode(gpsSerial.read());
+    while (GPS_SERIAL.available() > 0) {
+      gps.encode(GPS_SERIAL.read());
     }
     
     // Timeout after 30 seconds if we can't get valid time
@@ -361,7 +717,7 @@ void setup() {
   
   // Format filename as YYYYMMDD_HHMMSS.csv
   char filename[24];
-  snprintf(filename_base, sizeof(filename_base), "%04d%02d%02d_%02d%02d%02d",
+  snprintf(filename_base, sizeof(filename_base), "/%04d%02d%02d_%02d%02d%02d",
            gps.date.year(), gps.date.month(), gps.date.day(),
            gps.time.hour(), gps.time.minute(), gps.time.second());
   snprintf(filename, sizeof(filename), "%s.csv", filename_base);
@@ -395,8 +751,8 @@ void setup() {
 
 void sendGpsData() {
     // Get GPS data
-    while (gpsSerial.available()) {
-        gps.encode(gpsSerial.read());
+    while (GPS_SERIAL.available()) {
+        gps.encode(GPS_SERIAL.read());
     }
     
     if (gps.location.isValid()) {
@@ -513,7 +869,8 @@ void sendFrequencyAnnouncement() {
   if (radio->transmit((uint8_t*)&packet, sizeof(packet))) {
     Serial.print("Sent frequency announcement: ");
     Serial.print(operatingFrequency);
-    Serial.println(" MHz");
+    Serial.print(" MHz. Id:");
+    Serial.println(transmitterId);
   } else {
     Serial.println("Failed to send frequency announcement");
   }
@@ -685,12 +1042,15 @@ void loop() {
     }
   }
   
+  // Update battery level (safe function that handles initialization and errors)
+  updateBatteryLevel();
+  
   // Check for SNR feedback and adjust power if needed
   radio->processSnrFeedbackAndAdjustPower(TARGET_SNR);
   
   // Get current battery percentage with hysteresis to prevent rapid mode switching
   static bool lowBatteryMode = false;
-  uint8_t batteryPercent = (uint8_t)lipo.percent();
+  uint8_t batteryPercent = (uint8_t)batteryLevel;
   
   // Add hysteresis: enter low power mode at 45%, exit at 55%
   if (lowBatteryMode && batteryPercent >= 55) {

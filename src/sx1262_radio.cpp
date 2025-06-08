@@ -42,7 +42,7 @@ bool SX1262Radio::configure(float frequency, float bandwidth, uint8_t power) {
     
     // For LoRa, bandwidth options are typically 7.8E3, 10.4E3, 15.6E3, 20.8E3, 31.25E3, 
     // 41.7E3, 62.5E3, 125E3, 250E3, and 500E3 Hz
-    state = lora->setBandwidth(bandwidth * 1000); // Convert kHz to Hz
+    state = lora->setBandwidth(bandwidth); 
     if (state != RADIOLIB_ERR_NONE) return false;
     
     // Set power according to parameter

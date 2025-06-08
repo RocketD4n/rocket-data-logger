@@ -33,6 +33,9 @@ public:
     // Get the announcement frequency for SX1262 (863 MHz band)
     float getAnnouncementFrequency() override { return 863.0f; }
     
+    // Get the default operating frequency for SX1262
+    float getDefaultFrequency() const override { return 863.0f; }
+    
     // Use the default implementations from the Radio base class
     using Radio::processSnrFeedbackAndAdjustPower;
     using Radio::setAdaptivePowerParams;

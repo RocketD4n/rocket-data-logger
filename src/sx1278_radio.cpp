@@ -32,23 +32,83 @@ bool SX1278Radio::begin() {
 }
 
 bool SX1278Radio::configure(float frequency, float bandwidth, uint8_t power) {
-    if (!isInitialized) return false;
+    if (!isInitialized) {
+        Serial.println("[SX1278] Error: Radio not initialized");
+        return false;
+    }
     
     int state = lora->setFrequency(frequency);
-    if (state != RADIOLIB_ERR_NONE) return false;
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("[SX1278] Failed to set frequency ");
+        Serial.print(String(frequency));
+        Serial.print(" error: ");
+        Serial.println(state);
+        return false;
+    }
     
     // Store the current frequency
     operatingFrequency = frequency;
     
-    // For LoRa, bandwidth options are typically 7.8E3, 10.4E3, 15.6E3, 20.8E3, 31.25E3, 
-    // 41.7E3, 62.5E3, 125E3, 250E3, and 500E3 Hz
-    state = lora->setBandwidth(bandwidth * 1000); // Convert kHz to Hz
-    if (state != RADIOLIB_ERR_NONE) return false;
+    // Set bandwidth - must be one of: 7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250, or 500 kHz
+    // Round to nearest valid bandwidth if needed
+    float validBandwidths[] = {7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125.0, 250.0, 500.0};
+    float closestBandwidth = 125.0; // Default to 125 kHz if no good match
+    float minDiff = 1000.0;
     
-    // Set power according to parameter
+    // Find closest valid bandwidth
+    for (size_t i = 0; i < sizeof(validBandwidths)/sizeof(validBandwidths[0]); i++) {
+        float diff = abs(validBandwidths[i] - bandwidth);
+        if (diff < minDiff) {
+            minDiff = diff;
+            closestBandwidth = validBandwidths[i];
+        }
+    }
+    
+    // If the requested bandwidth is more than 10% different, log a warning
+    if (minDiff > (bandwidth * 0.1)) {
+        Serial.print("[SX1278] Warning: Bandwidth ");
+        Serial.print(bandwidth);
+        Serial.print(" kHz is not a standard value. Using closest valid bandwidth: ");
+        Serial.print(closestBandwidth);
+        Serial.println(" kHz");
+    }
+    
+    // Set bandwidth (already in kHz, no conversion needed)
+    state = lora->setBandwidth(closestBandwidth);
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("[SX1278] Failed to set bandwidth, error: ");
+        Serial.println(state);
+        return false;
+    }
+    
+    // Set spreading factor (default to 10 for good range/performance balance)
+    state = lora->setSpreadingFactor(10);
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("[SX1278] Warning: Failed to set spreading factor, error: ");
+        Serial.println(state);
+    }
+    
+    // Set coding rate (4/8 for better error correction)
+    state = lora->setCodingRate(8);
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("[SX1278] Warning: Failed to set coding rate, error: ");
+        Serial.println(state);
+    }
+    
+    // Set output power
     state = lora->setOutputPower(power);
-    if (state != RADIOLIB_ERR_NONE) return false;
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("[SX1278] Failed to set output power");
+        Serial.println(state);
+        return false;
+    }
     currentPower = power;
+    // Enable CRC for better reliability
+    state = lora->setCRC(true);
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.print("[SX1278] Warning: Failed to enable CRC, error: ");
+        Serial.println(state);
+    }
     
     return true;
 }

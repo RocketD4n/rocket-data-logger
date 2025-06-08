@@ -7,6 +7,7 @@
 #include <MAX1704X.h>
 #include <SD.h>
 #include <time.h>
+#include <RadioLib.h>
 #include "rocket_telemetry_protocol.h"
 #include "cc1101_radio.h"
 #include "sx1278_radio.h"
@@ -22,6 +23,10 @@
 
 // Radio instance - will be initialized to SX1262 by default
 Radio* radio = nullptr;
+
+// Direct access to SX1278 module for testing
+Module* testModule = nullptr;
+SX1278* testLora = nullptr;
 
 // Battery monitor configuration for ESP32-S3
 #define MAX17043_SDA 41  // SDA pin
@@ -60,6 +65,14 @@ void processFrequencyAnnouncePacket(uint8_t* buffer, size_t length);
 void sendFrequencyAcknowledgment(uint32_t transmitterId, float frequency);
 void switchToTransmitterFrequency(uint32_t transmitterId);
 void lowBatteryShutdown();
+void startSimulationMode();
+void updateSimulation();
+void testTouchScreen();
+
+// Touch test mode
+bool touchTestMode = true; // Set to true to enable touch test mode
+unsigned long lastTouchCheck = 0;
+const unsigned long TOUCH_CHECK_INTERVAL = 100; // Check touch every 100ms
 
 // SNR feedback control
 unsigned long lastSnrFeedbackTime = 0;
@@ -191,9 +204,8 @@ void setup() {
         sdCardAvailable = false;
     #endif
     
-    // Initialize radio if ENABLE_RADIO is defined
-    #define ENABLE_RADIO 1
-    #if ENABLE_RADIO
+    // Initialize radio if enabled
+    #ifndef DISABLE_RADIO
         Serial.println(F("[Radio] Starting SX1278 radio initialization"));
         Serial.println(F("Make sure SX1278 is connected to the same SPI bus as the display:"));
         Serial.println(F("- SCK: Pin 12"));
@@ -203,24 +215,46 @@ void setup() {
         Serial.print(F(", RST: ")); Serial.print(RADIO_RST);
         Serial.print(F(", DIO0: ")); Serial.println(RADIO_DIO0);
         
-        // Add a delay before initializing SPI for radio
-        delay(200);
-        
-        // Initialize SX1278 directly since we know that's what's connected
-        radio = new SX1278Radio(RADIO_CS, RADIO_RST, RADIO_DIO0);
-        Serial.print(F("[Radio] Initializing SX1278 ... "));
-        
-        // Try with different settings if needed
+        // Create and initialize the radio
         int initAttempts = 0;
+        const int MAX_INIT_ATTEMPTS = 3;
         bool radioInitialized = false;
         
-        while (!radioInitialized && initAttempts < 3) {
+        while (!radioInitialized && initAttempts < MAX_INIT_ATTEMPTS) {
             initAttempts++;
-            Serial.print(F("Attempt ")); Serial.print(initAttempts); Serial.print(F(": "));
             
-            radioInitialized = radio->begin();
+            // Try to initialize the SX1278 radio
+            radio = new SX1278Radio(RADIO_CS, RADIO_RST, RADIO_DIO0);
             
-            if (radioInitialized) {
+            Serial.print(F("[Radio] Initializing SX1278 ... Attempt ")); Serial.print(initAttempts); Serial.print(F(": "));
+            
+            // Try to initialize with more debug info
+            Serial.println(F("Attempting to initialize SX1278 radio..."));
+            Serial.println(F("Checking SPI connection..."));
+            
+            // Test SPI connection by checking if CS pin works
+            pinMode(RADIO_CS, OUTPUT);
+            digitalWrite(RADIO_CS, HIGH);
+            delay(10);
+            digitalWrite(RADIO_CS, LOW);
+            delay(10);
+            digitalWrite(RADIO_CS, HIGH);
+            Serial.println(F("CS pin toggled"));
+            
+            // Check reset pin
+            Serial.println(F("Testing reset pin..."));
+            pinMode(RADIO_RST, OUTPUT);
+            digitalWrite(RADIO_RST, LOW);
+            delay(10);
+            digitalWrite(RADIO_RST, HIGH);
+            delay(10);
+            Serial.println(F("Reset pin toggled"));
+            
+            // Now try to initialize
+            bool initResult = radio->begin();
+            
+            if (initResult) {
+                radioInitialized = true;
                 Serial.println(F("success!"));
                 Serial.println(F("SX1278 radio initialized successfully"));
                 
@@ -269,25 +303,241 @@ void setup() {
                         }
                     }
                 }
+                
+                // Initialize direct access to SX1278 for testing
+                Serial.println(F("Initializing direct SX1278 access for testing"));
+                testModule = new Module(RADIO_CS, RADIO_DIO0, RADIO_RST, RADIOLIB_NC);
+                testLora = new SX1278(testModule);
+                
+                int state = testLora->begin();
+                if (state == RADIOLIB_ERR_NONE) {
+                    Serial.println(F("Direct SX1278 initialization successful!"));
+                    
+                    // Configure LoRa for basic operation
+                    testLora->setCodingRate(5);           // 4/5 coding rate
+                    testLora->setSpreadingFactor(7);      // SF7 - fastest data rate
+                    testLora->setBandwidth(62.5);         // 62.5 kHz bandwidth - more reliable
+                    testLora->setPreambleLength(8);       // Standard preamble length
+                    testLora->setSyncWord(0x12);          // Common LoRa sync word
+                    testLora->setCRC(true);               // Enable CRC for reliability
+                    testLora->setOutputPower(5);          // 5 dBm output power
+                    
+                    Serial.println(F("Direct SX1278 configured for testing"));
+                } else {
+                    Serial.print(F("Direct SX1278 initialization failed with error code: ")); Serial.println(state);
+                    delete testLora;
+                    delete testModule;
+                    testLora = nullptr;
+                    testModule = nullptr;
+                }
             } else {
                 Serial.println(F("failed!"));
                 Serial.print(F("SX1278 initialization attempt ")); Serial.print(initAttempts); Serial.println(F(" failed"));
-                delay(300); // Longer delay between attempts
+                
+                // Clean up and try again
+                delete radio;
+                radio = nullptr;
+                delay(500); // Wait a bit before trying again
             }
         }
         
         if (!radioInitialized) {
-            Serial.println(F("All SX1278 initialization attempts failed"));
-            Serial.println(F("Check connections and make sure SX1278 is properly connected to the SPI bus"));
-            delete radio;
+            Serial.println(F("Failed to initialize SX1278 radio after multiple attempts"));
             radio = nullptr;
         }
     #else
-        Serial.println("Radio disabled");
-        radio = nullptr;
+        Serial.println(F("Radio disabled in build configuration"));
     #endif
     
-    Serial.println("Setup complete!");
+    // Initialize touch test mode if enabled
+    if (touchTestMode) {
+        Serial.println(F("Starting touch test mode"));
+        testTouchScreen();
+    }
+    
+    Serial.println(F("Setup complete!"));
+    
+    // Start simulation mode if no real transmitters are detected
+    if (display.getNumTransmitters() == 0) {
+        Serial.println("No transmitters detected, starting simulation mode");
+        startSimulationMode();
+    }
+}
+
+// Simulation variables
+bool simulationMode = false;
+unsigned long lastSimulationUpdate = 0;
+const unsigned long SIMULATION_UPDATE_INTERVAL = 500; // Update every 500ms
+float simulatedAltitude = 0.0f;
+float simulatedSpeed = 0.0f;
+float simulatedAcceleration = 0.0f;
+float simulatedBatteryVoltage = 3.7f;
+uint8_t simulatedBatteryPercent = 100;
+int8_t simulatedTxPower = 10;
+uint32_t simulatedUptime = 0;
+float simulatedTemperature = 25.0f;
+float simulatedMaxAltitude = 0.0f;
+float simulatedMaxG = 0.0f;
+float simulatedOrientX = 0.0f;
+float simulatedOrientY = 0.0f;
+float simulatedOrientZ = 1.0f;
+
+// Start simulation mode
+void startSimulationMode() {
+    simulationMode = true;
+    
+    // Create a simulated transmitter
+    uint32_t simulatedTransmitterId = 0x12345678;
+    display.addTransmitter(simulatedTransmitterId);
+    
+    // Set the transmitter frequency
+    display.setTransmitterFrequency(simulatedTransmitterId, 433.0f, 1); // SX1278 radio type
+    display.setFrequencyAcknowledged(simulatedTransmitterId, true);
+    
+    // Select the transmitter using the proper setter method
+    display.setSelectedTransmitterId(simulatedTransmitterId);
+    display.setRocketSelected(true);
+    
+    Serial.println("Simulation mode started");
+    Serial.println("Created simulated transmitter with ID: 0x12345678");
+    Serial.println("Simulating rocket launch and flight...");
+}
+
+// Update simulation data
+void updateSimulation() {
+    if (!simulationMode) return;
+    
+    unsigned long currentTime = millis();
+    if (currentTime - lastSimulationUpdate < SIMULATION_UPDATE_INTERVAL) return;
+    
+    lastSimulationUpdate = currentTime;
+    simulatedUptime += SIMULATION_UPDATE_INTERVAL;
+    
+    // Simulate flight phases
+    static int flightPhase = 0; // 0=pre-launch, 1=boost, 2=coast, 3=descent, 4=landed
+    static unsigned long phaseStartTime = 0;
+    static float maxAlt = 0.0f;
+    
+    if (flightPhase == 0 && simulatedUptime > 5000) {
+        // Start boost phase after 5 seconds
+        flightPhase = 1;
+        phaseStartTime = simulatedUptime;
+        Serial.println("Simulation: Boost phase started");
+    }
+    else if (flightPhase == 1 && (simulatedUptime - phaseStartTime > 3000)) {
+        // Boost for 3 seconds
+        flightPhase = 2;
+        phaseStartTime = simulatedUptime;
+        Serial.println("Simulation: Coast phase started");
+    }
+    else if (flightPhase == 2 && simulatedAltitude > maxAlt + 5.0f) {
+        // Keep track of max altitude during coast
+        maxAlt = simulatedAltitude;
+    }
+    else if (flightPhase == 2 && simulatedAltitude < maxAlt - 10.0f) {
+        // Start descent when we're 10m below max altitude
+        flightPhase = 3;
+        phaseStartTime = simulatedUptime;
+        Serial.println("Simulation: Descent phase started");
+    }
+    else if (flightPhase == 3 && simulatedAltitude < 1.0f) {
+        // Landed
+        flightPhase = 4;
+        phaseStartTime = simulatedUptime;
+        Serial.println("Simulation: Landed");
+    }
+    
+    // Update simulated values based on flight phase
+    switch (flightPhase) {
+        case 0: // Pre-launch
+            simulatedAltitude = 0.0f;
+            simulatedSpeed = 0.0f;
+            simulatedAcceleration = 0.0f;
+            simulatedOrientZ = 1.0f;
+            break;
+            
+        case 1: // Boost
+            simulatedAcceleration = 30.0f + random(-5, 5) / 10.0f; // ~3G with small variations
+            simulatedSpeed += simulatedAcceleration * (SIMULATION_UPDATE_INTERVAL / 1000.0f);
+            simulatedAltitude += simulatedSpeed * (SIMULATION_UPDATE_INTERVAL / 1000.0f);
+            simulatedTemperature += 0.1f; // Slowly increase temperature
+            simulatedBatteryVoltage -= 0.001f; // Slowly drain battery
+            simulatedOrientZ = 1.0f + random(-10, 10) / 100.0f; // Slight wobble
+            break;
+            
+        case 2: // Coast
+            simulatedAcceleration = -9.8f + random(-2, 2) / 10.0f; // Gravity with small variations
+            simulatedSpeed += simulatedAcceleration * (SIMULATION_UPDATE_INTERVAL / 1000.0f);
+            simulatedAltitude += simulatedSpeed * (SIMULATION_UPDATE_INTERVAL / 1000.0f);
+            simulatedTemperature -= 0.05f; // Slowly decrease temperature
+            simulatedBatteryVoltage -= 0.0005f; // Drain battery slower
+            simulatedOrientZ = 1.0f + random(-20, 20) / 100.0f; // More wobble
+            break;
+            
+        case 3: // Descent
+            simulatedAcceleration = -9.8f + random(-2, 2) / 10.0f; // Gravity with small variations
+            // Terminal velocity for parachute
+            if (simulatedSpeed < -15.0f) simulatedSpeed = -15.0f;
+            else simulatedSpeed += simulatedAcceleration * (SIMULATION_UPDATE_INTERVAL / 1000.0f);
+            simulatedAltitude += simulatedSpeed * (SIMULATION_UPDATE_INTERVAL / 1000.0f);
+            if (simulatedAltitude < 0.0f) simulatedAltitude = 0.0f;
+            simulatedTemperature += 0.02f; // Slowly increase temperature as we descend
+            simulatedBatteryVoltage -= 0.0005f; // Drain battery slower
+            simulatedOrientZ = random(-100, 100) / 100.0f; // Random orientation during descent
+            simulatedOrientX = random(-100, 100) / 100.0f;
+            simulatedOrientY = random(-100, 100) / 100.0f;
+            break;
+            
+        case 4: // Landed
+            simulatedAltitude = 0.0f;
+            simulatedSpeed = 0.0f;
+            simulatedAcceleration = 0.0f;
+            simulatedOrientZ = 0.0f;
+            simulatedOrientX = 1.0f;
+            simulatedBatteryVoltage -= 0.0001f; // Drain battery very slowly
+            break;
+    }
+    
+    // Update max values
+    if (simulatedAltitude > simulatedMaxAltitude) simulatedMaxAltitude = simulatedAltitude;
+    float gForce = abs(simulatedAcceleration / 9.8f);
+    if (gForce > simulatedMaxG) simulatedMaxG = gForce;
+    
+    // Calculate battery percentage
+    simulatedBatteryPercent = map(constrain((int)(simulatedBatteryVoltage * 100), 300, 420), 300, 420, 0, 100);
+    
+    // Update display with simulated data
+    display.updateAltitudeData(
+        simulatedAltitude,
+        simulatedMaxAltitude,
+        simulatedTemperature,
+        simulatedMaxG,
+        simulatedSpeed,
+        simulatedSpeed, // Use same value for both velocity sources
+        simulatedOrientX,
+        simulatedOrientY,
+        simulatedOrientZ
+    );
+    
+    display.updateSystemData(
+        simulatedBatteryVoltage,
+        simulatedBatteryPercent,
+        simulatedTxPower,
+        simulatedUptime,
+        0 // Tilt angle
+    );
+    
+    // Print simulation status every 2 seconds
+    static unsigned long lastPrint = 0;
+    if (currentTime - lastPrint > 2000) {
+        lastPrint = currentTime;
+        Serial.print("Simulation: Alt="); Serial.print(simulatedAltitude);
+        Serial.print("m, Speed="); Serial.print(simulatedSpeed);
+        Serial.print("m/s, Accel="); Serial.print(simulatedAcceleration);
+        Serial.print("m/s², Batt="); Serial.print(simulatedBatteryVoltage);
+        Serial.print("V ("); Serial.print(simulatedBatteryPercent);
+        Serial.println("%)");
+    }
 }
 
 // Original radio initialization success message and configuration
@@ -673,7 +923,357 @@ void lowBatteryShutdown() {
     esp_deep_sleep_start();
 }
 
+// Variables for radio testing
+unsigned long lastTestPacketTime = 0;
+const unsigned long TEST_PACKET_INTERVAL = 5000; // Send a test packet every 5 seconds
+
+// Function to test touchscreen functionality
+void testTouchScreen() {
+    // Clear screen
+    tft.fillScreen(ILI9341_BLACK);
+    
+    // Draw touch test interface
+    tft.setTextColor(ILI9341_WHITE);
+    tft.setTextSize(2);
+    tft.setCursor(10, 10);
+    tft.println("Touch Test Mode");
+    
+    // Print SPI configuration
+    tft.setTextSize(1);
+    tft.setCursor(10, 40);
+    tft.println("SPI Configuration:");
+    
+    tft.setCursor(10, 50);
+    tft.print("Display CS: ");
+    tft.println(TFT_CS);
+    tft.setCursor(10, 60);
+    tft.print("Touch CS: ");
+    tft.println(TOUCH_CS);
+    tft.setCursor(10, 70);
+    tft.print("Touch IRQ: ");
+    tft.println(TOUCH_IRQ);
+    tft.setCursor(10, 80);
+    tft.print("SPI MOSI: ");
+    tft.println(TFT_MOSI);
+    tft.setCursor(10, 90);
+    tft.print("SPI MISO: ");
+    tft.println(TFT_MISO);
+    tft.setCursor(10, 100);
+    tft.print("SPI CLK: ");
+    tft.println(TFT_CLK);
+    
+    // Try to reinitialize touchscreen
+    Serial.println("Reinitializing touchscreen...");
+    ts.begin();
+    
+    // Try to get initial touch reading
+    delay(100);
+    bool touched = ts.touched();
+    TS_Point p = ts.getPoint();
+    
+    tft.setCursor(10, 120);
+    tft.print("Touch state: ");
+    tft.println(touched ? "TOUCHED" : "NOT TOUCHED");
+    
+    tft.setCursor(10, 130);
+    tft.print("Raw values: x=");
+    tft.print(p.x);
+    tft.print(", y=");
+    tft.print(p.y);
+    tft.print(", z=");
+    tft.println(p.z);
+    
+    // Try with different rotation settings
+    Serial.println("Testing different touchscreen rotations...");
+    
+    for (int i = 0; i < 4; i++) {
+        ts.setRotation(i);
+        delay(50);
+        TS_Point p = ts.getPoint();
+        
+        tft.setCursor(10, 140 + i*10);
+        tft.print("Rotation ");
+        tft.print(i);
+        tft.print(": x=");
+        tft.print(p.x);
+        tft.print(", y=");
+        tft.print(p.y);
+        tft.print(", z=");
+        tft.println(p.z);
+        
+        Serial.print("Rotation ");
+        Serial.print(i);
+        Serial.print(": x=");
+        Serial.print(p.x);
+        Serial.print(", y=");
+        Serial.print(p.y);
+        Serial.print(", z=");
+        Serial.println(p.z);
+    }
+    
+    // Reset rotation to default
+    ts.setRotation(0);
+    
+    // Draw a target grid
+    tft.drawLine(0, tft.height()/2, tft.width(), tft.height()/2, ILI9341_DARKGREY);
+    tft.drawLine(tft.width()/2, 0, tft.width()/2, tft.height(), ILI9341_DARKGREY);
+    
+    // Draw touch points at the corners and center
+    tft.fillCircle(20, 20, 5, ILI9341_RED);
+    tft.fillCircle(tft.width()-20, 20, 5, ILI9341_RED);
+    tft.fillCircle(20, tft.height()-20, 5, ILI9341_RED);
+    tft.fillCircle(tft.width()-20, tft.height()-20, 5, ILI9341_RED);
+    tft.fillCircle(tft.width()/2, tft.height()/2, 5, ILI9341_RED);
+    
+    // Instructions to exit
+    tft.setCursor(10, tft.height() - 20);
+    tft.println("Touch center 3 times quickly to exit");
+}
+
+void testRadio() {
+    // First try with the regular Radio interface
+    if (radio) {
+        Serial.println(F("Testing with Radio interface..."));
+        
+        // Create a simple test packet
+        uint8_t testPacket[10] = {0};
+        testPacket[0] = 0x01; // Packet type (made up for testing)
+        testPacket[1] = 0x08; // Packet length
+        testPacket[2] = 0x78; // ID bytes (0x12345678)
+        testPacket[3] = 0x56;
+        testPacket[4] = 0x34;
+        testPacket[5] = 0x12;
+        testPacket[6] = 0xAA; // Test data
+        testPacket[7] = 0xBB;
+        testPacket[8] = 0xCC;
+        testPacket[9] = 0xDD;
+        
+        // Try to send the packet
+        Serial.println(F("Sending test packet via Radio interface..."));
+        int state = radio->transmit(testPacket, 10);
+        
+        if (state == RADIOLIB_ERR_NONE) {
+            Serial.println(F("Test packet sent successfully via Radio interface!"));
+        } else {
+            Serial.print(F("Radio interface transmission failed with error code: ")); Serial.println(state);
+        }
+    } else {
+        Serial.println(F("Radio interface not initialized, skipping this test"));
+    }
+    
+    // Now try with direct SX1278 access
+    if (testLora) {
+        Serial.println(F("\nTesting with direct SX1278 access..."));
+        
+        // Create a simple test packet
+        uint8_t testPacket[10] = {0};
+        testPacket[0] = 0x01; // Packet type (made up for testing)
+        testPacket[1] = 0x08; // Packet length
+        testPacket[2] = 0x78; // ID bytes (0x12345678)
+        testPacket[3] = 0x56;
+        testPacket[4] = 0x34;
+        testPacket[5] = 0x12;
+        testPacket[6] = 0xAA; // Test data
+        testPacket[7] = 0xBB;
+        testPacket[8] = 0xCC;
+        testPacket[9] = 0xDD;
+        
+        // Try to set frequency explicitly
+        Serial.println(F("Setting frequency to 433.0 MHz..."));
+        int freqState = testLora->setFrequency(433.0);
+        
+        if (freqState == RADIOLIB_ERR_NONE) {
+            Serial.println(F("Frequency set successfully"));
+        } else {
+            Serial.print(F("Failed to set frequency, error: ")); Serial.println(freqState);
+        }
+        
+        // Try to send the packet
+        Serial.println(F("Sending test packet via direct SX1278 access..."));
+        int state = testLora->transmit(testPacket, 10);
+        
+        if (state == RADIOLIB_ERR_NONE) {
+            Serial.println(F("Test packet sent successfully via direct SX1278 access!"));
+            Serial.print(F("Packet data: "));
+            for (int i = 0; i < 10; i++) {
+                Serial.print(testPacket[i], HEX);
+                Serial.print(" ");
+            }
+            Serial.println();
+        } else {
+            Serial.print(F("Direct SX1278 transmission failed with error code: ")); Serial.println(state);
+            
+            // Try to diagnose the issue
+            if (state == RADIOLIB_ERR_TX_TIMEOUT) {
+                Serial.println(F("Error: Transmission timed out"));
+            } else if (state == RADIOLIB_ERR_SPI_WRITE_FAILED) {
+                Serial.println(F("Error: SPI write failed - check connections"));
+            } else if (state == RADIOLIB_ERR_INVALID_FREQUENCY) {
+                Serial.println(F("Error: Invalid frequency"));
+            }
+        }
+        
+        // Try to receive any packets
+        Serial.println(F("Setting radio to receive mode..."));
+        state = testLora->startReceive();
+        
+        if (state == RADIOLIB_ERR_NONE) {
+            Serial.println(F("Radio set to receive mode successfully"));
+            
+            // Wait a moment in receive mode
+            delay(500);
+            
+            // Check if any packets were received
+            if (testLora->available()) {
+                Serial.println(F("Packet received!"));
+                
+                // Read the received packet
+                uint8_t rxData[64];
+                size_t rxLen = sizeof(rxData);
+                int rxState = testLora->readData(rxData, rxLen);
+                
+                if (rxState == RADIOLIB_ERR_NONE) {
+                    Serial.print(F("Received packet (")); Serial.print(rxLen); Serial.println(F(" bytes):"));
+                    for (size_t i = 0; i < rxLen; i++) {
+                        Serial.print(rxData[i], HEX);
+                        Serial.print(" ");
+                    }
+                    Serial.println();
+                } else {
+                    Serial.print(F("Failed to read received packet, error: ")); Serial.println(rxState);
+                }
+            } else {
+                Serial.println(F("No packets received during listening period"));
+            }
+        } else {
+            Serial.print(F("Failed to set radio to receive mode, error: ")); Serial.println(state);
+        }
+    } else {
+        Serial.println(F("Direct SX1278 access not initialized, skipping this test"));
+    }
+}
+
 void loop() {
+    unsigned long currentTime = millis();
+    
+    // Simple touchscreen test mode
+    if (touchTestMode) {
+        static bool initialized = false;
+        static unsigned long lastInfoUpdate = 0;
+        
+        // Initialize the test screen once
+        if (!initialized) {
+            tft.fillScreen(ILI9341_BLACK);
+            tft.setTextColor(ILI9341_WHITE);
+            tft.setTextSize(2);
+            tft.setCursor(10, 10);
+            tft.println("Touch Test Mode");
+            
+            tft.setTextSize(1);
+            tft.setCursor(10, 40);
+            tft.println("SPI Configuration:");
+            tft.setCursor(10, 50);
+            tft.print("Display CS: "); tft.println(TFT_CS);
+            tft.setCursor(10, 60);
+            tft.print("Touch CS: "); tft.println(TOUCH_CS);
+            tft.setCursor(10, 70);
+            tft.print("Touch IRQ: "); tft.println(TOUCH_IRQ);
+            
+            // Draw a target grid
+            tft.drawLine(0, tft.height()/2, tft.width(), tft.height()/2, ILI9341_DARKGREY);
+            tft.drawLine(tft.width()/2, 0, tft.width()/2, tft.height(), ILI9341_DARKGREY);
+            
+            // Draw touch points at the corners and center
+            tft.fillCircle(20, 20, 5, ILI9341_RED);
+            tft.fillCircle(tft.width()-20, 20, 5, ILI9341_RED);
+            tft.fillCircle(20, tft.height()-20, 5, ILI9341_RED);
+            tft.fillCircle(tft.width()-20, tft.height()-20, 5, ILI9341_RED);
+            tft.fillCircle(tft.width()/2, tft.height()/2, 5, ILI9341_RED);
+            
+            initialized = true;
+        }
+        
+        // Check touch status every 100ms
+        if (currentTime - lastTouchCheck > TOUCH_CHECK_INTERVAL) {
+            lastTouchCheck = currentTime;
+            
+            // Check if IRQ pin is working (if connected)
+            if (TOUCH_IRQ != 255) {
+                int irqState = digitalRead(TOUCH_IRQ);
+                static int lastIrqState = -1;
+                
+                if (irqState != lastIrqState) {
+                    Serial.print("Touch IRQ pin state: ");
+                    Serial.println(irqState == LOW ? "ACTIVE (LOW)" : "INACTIVE (HIGH)");
+                    lastIrqState = irqState;
+                }
+            }
+            
+            // Try to read touchscreen
+            bool touched = ts.touched();
+            TS_Point p = ts.getPoint();
+            
+            // Update display with touch info every second
+            if (currentTime - lastInfoUpdate > 1000) {
+                lastInfoUpdate = currentTime;
+                
+                // Clear info area
+                tft.fillRect(10, 90, 220, 60, ILI9341_BLACK);
+                
+                // Display touch status
+                tft.setCursor(10, 90);
+                tft.print("Touch state: ");
+                tft.println(touched ? "TOUCHED" : "NOT TOUCHED");
+                
+                // Display raw values
+                tft.setCursor(10, 100);
+                tft.print("Raw: x=");
+                tft.print(p.x);
+                tft.print(", y=");
+                tft.print(p.y);
+                tft.print(", z=");
+                tft.println(p.z);
+                
+                // Print to serial too
+                Serial.print("Touch state: ");
+                Serial.println(touched ? "TOUCHED" : "NOT TOUCHED");
+                Serial.print("Raw values: x=");
+                Serial.print(p.x);
+                Serial.print(", y=");
+                Serial.print(p.y);
+                Serial.print(", z=");
+                Serial.println(p.z);
+            }
+            
+            // If touched, show the point
+            if (touched) {
+                // Map touch coordinates to screen
+                int y = map(p.x, 240, 3800, 0, tft.width());
+                int x = map(p.y, 240, 3800, 0, tft.height());
+                
+                // Draw touch point if in bounds
+                if (x >= 0 && x < tft.height() && y >= 0 && y < tft.width()) {
+                    tft.fillCircle(y, x, 3, ILI9341_GREEN);
+                }
+            }
+        }
+        
+        // Skip the rest of the loop in touch test mode
+        return;
+    }
+    
+    // Normal operation mode
+    // Test the radio every few seconds
+    if (currentTime - lastTestPacketTime > TEST_PACKET_INTERVAL) {
+        lastTestPacketTime = currentTime;
+        testRadio();
+    }
+    
+    // Update simulation if in simulation mode
+    if (simulationMode) {
+        updateSimulation();
+    }
+    
     // Track buzzer state for change detection and periodic resending
     static bool lastBuzzerState = false;
     static unsigned long lastBuzzerCommandTime = 0;
@@ -747,9 +1347,35 @@ void loop() {
     // Handle touch events
     if (ts.touched()) {
         TS_Point p = ts.getPoint();
+        // Print raw touch coordinates
+        Serial.print("Raw touch: x=");
+        Serial.print(p.x);
+        Serial.print(", y=");
+        Serial.print(p.y);
+        Serial.print(", z=");
+        Serial.println(p.z);
+        
         // Convert touch coordinates to screen coordinates
         int y = map(p.x, 240, 3800, 0, tft.width());
         int x = map(p.y, 240, 3800, 0, tft.height());
+        
+        // Print mapped screen coordinates
+        Serial.print("Screen coordinates: x=");
+        Serial.print(x);
+        Serial.print(", y=");
+        Serial.println(y);
+        
+        // Also display on screen for visual feedback
+        tft.fillRect(0, 0, 100, 20, ILI9341_BLACK);
+        tft.setCursor(0, 0);
+        tft.setTextColor(ILI9341_GREEN);
+        tft.setTextSize(1);
+        tft.print("X:");
+        tft.print(x);
+        tft.print(" Y:");
+        tft.print(y);
+        
+        // Handle the touch event
         display.handleTouch(x, y);
     }
     

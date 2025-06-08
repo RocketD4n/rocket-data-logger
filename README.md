@@ -19,7 +19,7 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 ## Hardware Requirements
 
 ### Data Logger (Rocket)
-- NodeMCU v2 (ESP8266) and power supply
+- ESP32-C3 SuperMini or ESP32 Dev Board and power supply
 - One of the following radio modules:
   - HT-RA62 (SX1262) 863MHz LoRa Transmitter (default), or
   - SX1278 433MHz LoRa Transmitter, or
@@ -30,16 +30,17 @@ This project is a rocket telemetry system that logs GPS data, altitude, and IMU 
 - SD Card Module
 - 2* Relay Modules (for parachute deployment)
 - MAX17043 LiPo Battery Fuel Gauge
+- PCF8574 I2C expander
 
 ### Telemetry Receiver (Ground Station)
-- ESP32 Dev Board and power supply
+- ESP32-S3-N16R8 and power supply
 - One of the following radio modules:
   - HT-RA62 (SX1262) 863MHz LoRa Receiver (default), or
   - SX1278 433MHz LoRa Receiver, or
   - CC1101 433MHz Receiver
 - 2.8" TFT Display (ILI9341) with XPT2046 touch controller
 - MAX17043 LiPo Battery Fuel Gauge
-- MicroSD card for data logging
+- SD card for data logging
 
 ## Hardware Setup and Wiring
 
@@ -148,14 +149,14 @@ The main page shows real-time telemetry data in an easy-to-read format:
 
 ```
 +------------------------------------------------------+
-| <              [===|] 85%                         > |
-| Alt:      123.4m               Battery: 3.70V 85%     |
-| Max Alt:  456.7m               Launch:  Waiting...    |
+| <              [===|] 85%                         >  |
+| Alt:      123.4m               Battery: 3.70V 85%    |
+| Max Alt:  456.7m               Launch:  Waiting...   |
 | GPS:      12.34567,-12.34567   Temp:    25.1C        |
 | Staleness: 5s                  Max-G:   3.2g         |
 | Accel-V:  45.6 m/s             Baro-V:  44.2 m/s     |
 |                                TX Power: 10 dBm      |
-| Stats: 123 pkts, 12 errs, SNR: 15.1dB               |
+| Stats: 123 pkts, 12 errs, SNR: 15.1dB                |
 +------------------------------------------------------+
 ```
 
@@ -165,17 +166,17 @@ The second page displays a real-time graph of altitude versus time, allowing use
 
 ```
 +------------------------------------------------------+
-| <           [===|] 85%                            > |
-|                                                       |
-|    ^                                                  |
-|    |                                                  |
-| A  |               /\                                 |
-| l  |              /  \                                |
-| t  |             /    \                               |
-|    |            /      \                              |
-|    |           /        \___                          |
-|    +---------------------------------------->         |
-|                      Time (s)                         |
+| <           [===|] 85%                            >  |
+|                                                      |
+|    ^                                                 |
+|    |                                                 |
+| A  |               /\                                |
+| l  |              /  \                               |
+| t  |             /    \                              |
+|    |            /      \                             |
+|    |           /        \___                         |
+|    +---------------------------------------->        |
+|                      Time (s)                        |
 +------------------------------------------------------+
 ```
 
@@ -185,18 +186,18 @@ The third page shows a real-time graph of vertical speed versus time, calculated
 
 ```
 +------------------------------------------------------+
-| <           [===|] 85%                            > |
-|                                                       |
-|    ^                                                  |
-|    |                                                  |
-| S  |               /\                                 |
-| p  |              /  \                                |
-| e  |             /    \                               |
-| e  |            /      \                              |
-| d  |___________/        \___                          |
-|    +---------------------------------------->         |
-|                      Time (s)                         |
-|    Accel-V: ---- Baro-V: ----                         |
+| <           [===|] 85%                            >  |
+|                                                      |
+|    ^                                                 |
+|    |                                                 |
+| S  |               /\                                |
+| p  |              /  \                               |
+| e  |             /    \                              |
+| e  |            /      \                             |
+| d  |___________/        \___                         |
+|    +---------------------------------------->        |
+|                      Time (s)                        |
+|    Accel-V: ---- Baro-V: ----                        |
 +------------------------------------------------------+
 ```
 
@@ -206,17 +207,17 @@ The fourth page displays the transmission power over time, showing how the adapt
 
 ```
 +------------------------------------------------------+
-| <           [===|] 85%                            > |
-|                                                       |
-|    ^                                                  |
-|    |                                                  |
-| P  |                                                  |
-| o  |    _______________                               |
-| w  |   /                \___                          |
-| e  |  /                     \___                      |
-| r  | /                          \___                  |
-|    +---------------------------------------->         |
-|                      Time (s)                         |
+| <           [===|] 85%                            >  |
+|                                                      |
+|    ^                                                 |
+|    |                                                 |
+| P  |                                                 |
+| o  |    _______________                              |
+| w  |   /                \___                         |
+| e  |  /                     \___                     |
+| r  | /                          \___                 |
+|    +---------------------------------------->        |
+|                      Time (s)                        |
 +------------------------------------------------------+
 ```
 
@@ -226,20 +227,20 @@ The fifth page shows the rocket's orientation and tilt information with a dynami
 
 ```
 +------------------------------------------------------+
-| <           [===|] 85%                            > |
+| <           [===|] 85%                            >  |
 |             Rocket Orientation                       |
-|                                                       |
+|                                                      |
 |    Tilt from vertical: 12.5°                         |
-|                                                       |
-|                    /\                                 |
-|                   /  \                                |
-|                  /    \                               |
-|                 /      \                              |
-|                /        \                             |
-|               /          \                            |
-|              /__________\                             |
-|                                                       |
-|    X-axis: 0.12   Y-axis: -0.24   Z-axis: 0.96        |
+|                                                      |
+|                    /\                                |
+|                   /  \                               |
+|                  /    \                              |
+|                 /      \                             |
+|                /        \                            |
+|               /          \                           |
+|              /__________\                            |
+|                                                      |
+|    X-axis: 0.12   Y-axis: -0.24   Z-axis: 0.96       |
 |    Staleness: 5s                                     |
 +------------------------------------------------------+
 ```
@@ -250,21 +251,21 @@ The sixth page displays a list of last known GPS coordinates for all tracked tra
 
 ```
 +------------------------------------------------------+
-| <           [===|] 85%                            > |
+| <           [===|] 85%                            >  |
 |            Last Known Positions                      |
-|                                                       |
+|                                                      |
 |    Rocket Alpha                                      |
 |    Lat: 37.123456, Lng: -122.543210       [Clear]    |
 |    Dist: 1.2km, Bearing: 245° (SW)                   |
-|                                                       |
+|                                                      |
 |    Rocket Beta                                       |
 |    Lat: 37.234567, Lng: -122.654321       [Clear]    |
 |    Dist: 350m, Bearing: 78° (E)                      |
-|                                                       |
+|                                                      |
 |    Rocket Gamma                                      |
 |    Lat: 37.345678, Lng: -122.765432       [Clear]    |
 |    Dist: 2.5km, Bearing: 180° (S)                    |
-|                                                       |
+|                                                      |
 +------------------------------------------------------+
 ```
 
@@ -274,22 +275,22 @@ The seventh page allows the user to select which transmitter to monitor when mul
 
 ```
 +------------------------------------------------------+
-| <           [===|] 85%                            > |
-|                                                       |
+| <           [===|] 85%                            >  |
+|                                                      |
 |    Transmitter ID: 0xA1B2C3D4 (selected)             |
 |    Uptime: 00:15:32                                  |
 |    Frequency: 863.5 MHz (SX1262)                     |
-|                                                       |
+|                                                      |
 |    Transmitter ID: 0xE5F6G7H8                        |
 |    Uptime: 00:05:12                                  |
 |    Frequency: 433.2 MHz (SX1278)                     |
-|                                                       |
+|                                                      |
 |    Transmitter ID: 0xI9J0K1L2                        |
 |    Uptime: 00:23:45                                  |
 |    Frequency: 434.0 MHz (CC1101)                     |
-|                                                       |
+|                                                      |
 |    Tap an ID to select that transmitter              |
-|                                                       |
+|                                                      |
 +------------------------------------------------------+
 ```
 
@@ -529,9 +530,26 @@ The system creates several types of log files on the SD card:
 
 Each log entry includes a timestamp, allowing for accurate time-series analysis. The filenames include the rocket's power-on date and time obtained from GPS, making it easy to organize data from multiple flights.
 
-## Pin Configuration
+## Board Configuration
 
-### Data Logger (ESP32-C3 SuperMini) Pins
+This project supports two different ESP32 board variants:
+1. **ESP32-C3 SuperMini** - Compact board with limited GPIO pins
+2. **Regular ESP32** - Standard ESP32 development board with more GPIO pins
+
+You can easily switch between these boards by changing the `BOARD_TYPE` define in `board_config.h` or by selecting the appropriate PlatformIO environment:
+
+```cpp
+// In board_config.h
+#define BOARD_TYPE 0  // 0 = ESP32-C3 SuperMini, 1 = Regular ESP32
+```
+
+Alternatively, you can select the appropriate PlatformIO environment:
+- `env:rocket_logger_c3` for ESP32-C3 SuperMini
+- `env:rocket_logger_esp32` for regular ESP32
+
+### Pin Configuration
+
+#### ESP32-C3 SuperMini Pins (BOARD_TYPE 0)
 | Function | SX1278 Pin | ESP32-C3 GPIO |
 |----------|------------|---------------|
 | Radio NSS (Chip Select) | NSS | GPIO7 |
@@ -540,8 +558,8 @@ Each log entry includes a timestamp, allowing for accurate time-series analysis.
 | Radio SCK | SCK | GPIO4 |
 | Radio MISO | MISO | GPIO5 |
 | Radio MOSI | MOSI | GPIO6 |
-| GPS RX | - | GPIO3 (RX) |
-| GPS TX | - | GPIO0 (TX) |
+| GPS RX | - | GPIO3 |
+| GPS TX | - | GPIO0 |
 | SD Card CS | - | GPIO10 |
 | SD Card MOSI | - | GPIO6 (shared with Radio) |
 | SD Card MISO | - | GPIO5 (shared with Radio) |
@@ -551,15 +569,46 @@ Each log entry includes a timestamp, allowing for accurate time-series analysis.
 | Primary Relay | - | PCF8574 P0 | 
 | Backup Relay | - | PCF8574 P1 |
 | Buzzer | - | PCF8574 P2 |
-| LED | - | Built-in LED (GPIO8) |
+| Red LED | - | PCF8574 P3 |
+| Green LED | - | PCF8574 P4 |
+| Blue LED | - | PCF8574 P5 |
 
-**Important Notes:**
-1. The ESP32-C3 SuperMini has limited GPIO pins compared to the NodeMCU.
-2. The SPI bus (MOSI, MISO, SCK) is shared between the Radio and SD card to save pins.
-3. The built-in LED on GPIO8 is now free for use as an indicator.
-4. **PCF8574 I2C Expander**: 
+**ESP32-C3 SuperMini Notes:**
+1. Uses SoftwareSerial for GPS due to limited hardware serial ports
+2. The SPI bus (MOSI, MISO, SCK) is shared between the Radio and SD card to save pins
+3. Uses RGB LED connected to PCF8574 expander (common anode, active LOW)
+
+#### Regular ESP32 Pins (BOARD_TYPE 1)
+| Function | SX1278 Pin | ESP32 GPIO |
+|----------|------------|------------|
+| Radio NSS (Chip Select) | NSS | GPIO5 |
+| Radio DIO0 | D0 | GPIO4 |
+| Radio Reset | RST | GPIO2 |
+| Radio SCK | SCK | GPIO18 |
+| Radio MISO | MISO | GPIO19 |
+| Radio MOSI | MOSI | GPIO23 |
+| GPS RX | - | GPIO16 |
+| GPS TX | - | GPIO17 |
+| SD Card CS | - | GPIO15 |
+| SD Card MOSI | - | GPIO23 (shared with Radio) |
+| SD Card MISO | - | GPIO19 (shared with Radio) |
+| SD Card SCK | - | GPIO18 (shared with Radio) |
+| I2C SDA (MPU6050, BMP180, MAX17043) | - | GPIO21 |
+| I2C SCL (MPU6050, BMP180, MAX17043) | - | GPIO22 |
+| Primary Relay | - | PCF8574 P0 | 
+| Backup Relay | - | PCF8574 P1 |
+| Buzzer | - | PCF8574 P2 |
+| LED | - | GPIO2 |
+
+**Regular ESP32 Notes:**
+1. Uses hardware Serial2 for GPS (more reliable than SoftwareSerial)
+2. The SPI bus is still shared between Radio and SD card
+3. Has more GPIO pins available for future expansion
+
+**Common to Both Boards:**
+1. **PCF8574 I2C Expander**: 
    - Used for relay and buzzer control to save GPIO pins
-   - Connected to the I2C bus on GPIO20 (SDA) and GPIO21 (SCL)
+   - Connected to the I2C bus (pins vary by board)
    - Default I2C address: 0x20 (can be changed with A0-A2 pins if needed)
    - Primary relay on P0, backup relay on P1, buzzer on P2
 
